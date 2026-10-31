@@ -58,9 +58,16 @@ export type SimCommand =
   | { type: 'fms.invert' }
   | { type: 'fms.clear' }
   | { type: 'fms.obs'; on: boolean }
+  /** Sets the GPS OBS course directly, whatever the CDI source (GTN OBS page, G1000 OBS softkey). */
+  | { type: 'fms.obsCourse'; mag: number }
   | { type: 'ap.engage'; on: boolean }
   | { type: 'ap.flightDirector'; on: boolean }
-  | { type: 'ap.lateral'; mode: LateralMode }
+  /** Selects a lateral mode. For ROL, `rollRefDeg` overrides the bank held (0 = wings level, as on a KAP 140). */
+  | { type: 'ap.lateral'; mode: LateralMode; rollRefDeg?: number }
+  /** Arms NAV capture (or disarms it); the current lateral mode flies until capture. */
+  | { type: 'ap.armNav'; on: boolean }
+  /** GPS steering on or off (G5 / Aspen GPSS with a heading-only autopilot). */
+  | { type: 'ap.gpss'; on: boolean }
   | { type: 'ap.vertical'; mode: VerticalMode }
   | { type: 'ap.armAltitude'; on: boolean }
   /** Level mode (GFC 500 LVL, also the KAP 140 / GFC "blue button" recovery): wings level, zero vertical speed. */
@@ -108,11 +115,17 @@ function disconnect(state: SimState, reason: string): SimState {
   return withMessage({ ...state, ap: { ...state.ap, engaged: false } }, reason, 'caution');
 }
 
-/** Modes chosen when the autopilot engages with nothing selected: wings level and hold pitch. */
+/**
+ * Modes chosen when the autopilot engages with nothing selected: wings level
+ * and hold pitch. With the director off there is no live selection, so any
+ * arm left over from an earlier engagement is dropped too.
+ */
 function engageDefaults(state: SimState): AutopilotState {
   const a = state.aircraft;
+  const fresh = !state.ap.flightDirector;
   return {
     ...state.ap,
+    ...(fresh && { lateralArmed: null, altitudeArmed: false }),
     engaged: true,
     lateral: state.ap.flightDirector ? state.ap.lateral : 'ROL',
     vertical: state.ap.flightDirector ? state.ap.vertical : 'PIT',
@@ -226,6 +239,8 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
       return setFms(fms.invertPlan(state.fms, pos));
     case 'fms.clear':
       return setFms(fms.clearPlan(state.fms));
+    case 'fms.obsCourse':
+      return setFms(fms.setObsCourse(state.fms, cmd.mag));
     case 'fms.obs': {
       // Entering OBS mode starts from the current desired track so the needle doesn't jump.
       const leg = state.fms.activeLeg;
@@ -243,13 +258,22 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
     case 'ap.flightDirector': {
       if (!cmd.on && state.ap.engaged) return state; // FD stays on while the autopilot flies
       const ap = cmd.on && !state.ap.flightDirector ? { ...engageDefaults(state), engaged: false } : state.ap;
-      return { ...state, ap: { ...ap, flightDirector: cmd.on } };
+      // Turning the director off cancels its armed modes.
+      const disarm = cmd.on ? {} : { lateralArmed: null, altitudeArmed: false };
+      return { ...state, ap: { ...ap, ...disarm, flightDirector: cmd.on } };
     }
     case 'ap.lateral': {
       const ap = state.ap.engaged || state.ap.flightDirector ? state.ap : { ...engageDefaults(state), engaged: false, flightDirector: true };
-      const rollRefDeg = cmd.mode === 'ROL' ? (Math.abs(a.bankDeg) < 6 ? 0 : Math.max(Math.min(a.bankDeg, 22), -22)) : ap.rollRefDeg;
-      return { ...state, ap: { ...ap, lateral: cmd.mode, rollRefDeg } };
+      const held = Math.abs(a.bankDeg) < 6 ? 0 : Math.max(Math.min(a.bankDeg, 22), -22);
+      const rollRefDeg = cmd.mode === 'ROL' ? cmd.rollRefDeg ?? held : ap.rollRefDeg;
+      // Selecting NAV directly supersedes an armed capture.
+      const lateralArmed = cmd.mode === 'NAV' ? null : ap.lateralArmed;
+      return { ...state, ap: { ...ap, lateral: cmd.mode, rollRefDeg, lateralArmed } };
     }
+    case 'ap.armNav':
+      return { ...state, ap: { ...state.ap, lateralArmed: cmd.on ? 'NAV' : null } };
+    case 'ap.gpss':
+      return { ...state, ap: { ...state.ap, gpss: cmd.on } };
     case 'ap.vertical': {
       const ap = state.ap.engaged || state.ap.flightDirector ? state.ap : { ...engageDefaults(state), engaged: false, flightDirector: true };
       const next: AutopilotState = { ...ap, vertical: cmd.mode };
@@ -265,7 +289,17 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
     case 'ap.level':
       return {
         ...state,
-        ap: { ...state.ap, engaged: true, flightDirector: true, lateral: 'ROL', rollRefDeg: 0, vertical: 'VS', altitudeArmed: false },
+        ap: {
+          ...state.ap,
+          engaged: true,
+          flightDirector: true,
+          lateral: 'ROL',
+          rollRefDeg: 0,
+          vertical: 'VS',
+          altitudeArmed: false,
+          lateralArmed: null,
+          gpss: false,
+        },
         bugs: { ...state.bugs, verticalSpeedFpm: 0 },
       };
     case 'ap.nudge': {

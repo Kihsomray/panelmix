@@ -89,6 +89,65 @@ describe('autopilot', () => {
     expect(Math.abs(s.getDerived().gps.crossTrackNm)).toBeLessThan(0.15);
   });
 
+  it('flies the heading with NAV armed, then captures the course', () => {
+    const start = initialSimState();
+    const leg = start.fms.activeLeg!;
+    const course = bearing(leg.from, leg.to);
+    // 3 nm left of the leg, heading to intercept at 30 degrees.
+    const offset = destination(destination(leg.from, course, 6), course - 90, 3);
+    const s = sim({ ...start, aircraft: { ...start.aircraft, lat: offset.lat, lon: offset.lon } });
+    const interceptHeading = Math.round(s.getDerived().gps.dtkMag! + 30);
+    s.dispatch({ type: 'bug.heading', mag: interceptHeading });
+    s.dispatch({ type: 'ap.engage', on: true });
+    s.dispatch({ type: 'ap.lateral', mode: 'HDG' });
+    s.dispatch({ type: 'ap.armNav', on: true });
+    s.step(5);
+    expect(s.getState().ap).toMatchObject({ lateral: 'HDG', lateralArmed: 'NAV' });
+    s.step(240);
+    expect(s.getState().ap).toMatchObject({ lateral: 'NAV', lateralArmed: null });
+    expect(Math.abs(s.getDerived().gps.crossTrackNm)).toBeLessThan(0.3);
+  });
+
+  it('follows the GPS course in HDG mode with GPS steering on', () => {
+    const start = initialSimState();
+    const leg = start.fms.activeLeg!;
+    const course = bearing(leg.from, leg.to);
+    const offset = destination(destination(leg.from, course, 5), course + 90, 1);
+    const s = sim({ ...start, aircraft: { ...start.aircraft, lat: offset.lat, lon: offset.lon } });
+    // The bug points far away from the course; GPSS ignores it.
+    s.dispatch({ type: 'bug.heading', mag: 180 });
+    s.dispatch({ type: 'ap.engage', on: true });
+    s.dispatch({ type: 'ap.lateral', mode: 'HDG' });
+    s.dispatch({ type: 'ap.gpss', on: true });
+    s.step(150);
+    expect(Math.abs(s.getDerived().gps.crossTrackNm)).toBeLessThan(0.15);
+    expect(s.getState().ap.lateral).toBe('HDG');
+  });
+
+  it('can level the wings in ROL whatever the current bank', () => {
+    const s = sim();
+    s.dispatch({ type: 'controls.set', roll: 1, pitch: 0 });
+    s.step(2);
+    s.dispatch({ type: 'controls.set', roll: 0, pitch: 0 });
+    expect(Math.abs(s.getState().aircraft.bankDeg)).toBeGreaterThan(10);
+    s.dispatch({ type: 'ap.engage', on: true });
+    s.dispatch({ type: 'ap.lateral', mode: 'ROL', rollRefDeg: 0 });
+    s.step(10);
+    expect(Math.abs(s.getState().aircraft.bankDeg)).toBeLessThan(1);
+  });
+
+  it('does not bring back a stale arm when the director comes back on', () => {
+    const s = sim();
+    s.dispatch({ type: 'ap.flightDirector', on: true });
+    s.dispatch({ type: 'ap.armNav', on: true });
+    s.dispatch({ type: 'ap.flightDirector', on: false });
+    s.dispatch({ type: 'ap.flightDirector', on: true });
+    expect(s.getState().ap.lateralArmed).toBeNull();
+    s.dispatch({ type: 'ap.armNav', on: true });
+    s.dispatch({ type: 'ap.engage', on: true });
+    expect(s.getState().ap.lateralArmed).toBe('NAV'); // a live selection survives engagement
+  });
+
   it('disconnects when the pilot moves the yoke', () => {
     const s = sim();
     s.dispatch({ type: 'ap.engage', on: true });
@@ -226,6 +285,15 @@ describe('commands', () => {
     expect(s.getState().fms.obsCourseMag).toBe(Math.round(dtk));
     s.dispatch({ type: 'course.set', mag: 250 });
     expect(s.getState().fms.obsCourseMag).toBe(250);
+  });
+
+  it('sets the GPS OBS course whatever the CDI source', () => {
+    const s = sim();
+    s.dispatch({ type: 'fms.obs', on: true });
+    s.dispatch({ type: 'cdi.source', source: 'NAV1' });
+    s.dispatch({ type: 'fms.obsCourse', mag: 123 });
+    expect(s.getState().fms.obsCourseMag).toBe(123);
+    expect(s.getState().nav.obsMag[0]).not.toBe(123);
   });
 
   it('cycles the CDI through the sources the panel has', () => {

@@ -142,7 +142,8 @@ export function AttitudeIndicator(p: AttitudeProps) {
       </g>
 
       {fd && (
-        <g transform={`rotate(${-(fd.bankDeg - p.bankDeg)} ${cx} ${cy}) translate(0 ${-(fd.pitchDeg - p.pitchDeg) * ppd})`}>
+        // Command bars bank toward the commanded roll: a right roll command tilts them right wing down.
+        <g transform={`rotate(${fd.bankDeg - p.bankDeg} ${cx} ${cy}) translate(0 ${-(fd.pitchDeg - p.pitchDeg) * ppd})`}>
           <path
             d={`M${cx} ${cy} l${-half * 1.1} ${half * 0.32} l${half * 0.2} ${half * 0.06} Z M${cx} ${cy} l${half * 1.1} ${half * 0.32} l${-half * 0.2} ${half * 0.06} Z`}
             fill={AV.magenta}

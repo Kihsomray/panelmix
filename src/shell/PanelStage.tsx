@@ -4,6 +4,7 @@ import { device } from '../devices/registry';
 import type { DeviceProps, DeviceSpec, PanelInfo, Slot } from '../devices/types';
 import { DeviceFrame } from '../ui/DeviceFrame';
 import { Icon } from './Icon';
+import { computeLayout, focusWidth } from './layout';
 import type { PanelConfig } from './panels';
 
 /*
@@ -14,8 +15,8 @@ import type { PanelConfig } from './panels';
  * screen.
  */
 
-const GAP = 18;
-const TWO_COLUMN_MIN = 760;
+/** Height of the fixed sim bar plus a little breathing room. */
+const SIMBAR_ALLOWANCE = 74;
 
 interface Placed {
   readonly slot: Slot;
@@ -23,13 +24,17 @@ interface Placed {
   readonly width: number;
 }
 
+/** The element's width, and the height left between its top and the sim bar. */
 function useSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => setSize({ w: el.clientWidth, h: window.innerHeight });
+    const measure = () => {
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      setSize({ w: el.clientWidth, h: Math.max(window.innerHeight - top - SIMBAR_ALLOWANCE, 200) });
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -137,26 +142,17 @@ export function PanelStage({
     return () => window.removeEventListener('keydown', onKey);
   }, [focus]);
 
-  // Vertical room for the panel: the viewport minus the header and the sim bar.
-  const availH = Math.max(size.h - 150, 320);
-  const twoColumns = size.w >= TWO_COLUMN_MIN;
+  const layout = computeLayout({ width: size.w, height: size.h, pfd: { width: pfd.width, height: pfd.height }, stack: right });
+  const twoColumns = layout.columns === 2;
 
   let left: Placed[] = [];
   let rightPlaced: Placed[] = [];
   if (size.w > 0) {
     if (twoColumns) {
-      const frac = Math.min(Math.max(pfd.width / (pfd.width + nav.width), 0.42), 0.62);
-      const leftW = (size.w - GAP) * frac;
-      const rightW = size.w - GAP - leftW;
-      const barH = 34;
-      const pfdScale = Math.min(leftW / pfd.width, (availH - barH) / pfd.height);
-      left = [{ slot: 'pfd', spec: pfd, width: pfd.width * Math.max(pfdScale, (leftW / pfd.width) * 0.6) }];
-      const sumH = right.reduce((s, d) => s + d.height, 0);
-      const maxW = Math.max(...right.map((d) => d.width));
-      const rs = Math.min(rightW / maxW, (availH - right.length * (barH + GAP)) / sumH);
-      const scale = Math.max(rs, (rightW / maxW) * 0.6);
-      rightPlaced = right.map((d) => ({ slot: d.slot, spec: d, width: d.width * scale }));
+      left = [{ slot: 'pfd', spec: pfd, width: pfd.width * layout.pfdScale }];
+      rightPlaced = right.map((d) => ({ slot: d.slot, spec: d, width: d.width * layout.stackScale }));
     } else {
+      // One column: each unit as wide as the screen, within reason.
       const fit = (d: DeviceSpec) => Math.min(size.w, d.width * 1.6);
       left = [{ slot: 'pfd', spec: pfd, width: fit(pfd) }];
       rightPlaced = right.map((d) => ({ slot: d.slot, spec: d, width: fit(d) }));
@@ -165,16 +161,17 @@ export function PanelStage({
 
   // Focusing re-sizes the same mounted unit (so its pages and cursors are kept)
   // and pins it over the panel.
-  const focusWidth = (p: Placed) => {
-    const h = Math.max(window.innerHeight - 150, 200);
-    return Math.max(Math.min(size.w - 16, (h / p.spec.height) * p.spec.width, p.spec.width * 2), 120);
-  };
+  const focusedWidth = (p: Placed) =>
+    focusWidth(
+      { width: p.spec.width, height: p.spec.height },
+      { width: Math.min(window.innerWidth, size.w + 28) - 20, height: window.innerHeight - 64 - SIMBAR_ALLOWANCE - 34 },
+    );
   const slot = (p: Placed) => {
     const isFocused = focus === p.slot;
     return (
       <DeviceSlot
         key={p.spec.id}
-        placed={isFocused ? { ...p, width: focusWidth(p) } : p}
+        placed={isFocused ? { ...p, width: focusedWidth(p) } : p}
         panel={panel}
         focused={isFocused}
         onFocus={() => setFocus(isFocused ? null : p.slot)}

@@ -14,6 +14,9 @@ export interface KnobHandlers {
   readonly turnOuter?: (steps: number) => void;
   readonly turnInner?: (steps: number) => void;
   readonly push?: () => void;
+  /** Push and hold (sync, flip-flop, emergency frequency on some units). */
+  readonly longPush?: () => void;
+  readonly longPushLabel?: string;
 }
 
 type Listener = (k: KnobHandlers | null) => void;
@@ -26,11 +29,24 @@ export function openDock(k: KnobHandlers): void {
   for (const l of listeners) l(current);
 }
 
-/** Keeps the dock's handlers fresh while the same knob stays selected. */
+const LABEL_KEYS = ['label', 'outerLabel', 'innerLabel', 'pushLabel', 'longPushLabel'] as const;
+const sameLabels = (a: KnobHandlers, b: KnobHandlers) =>
+  LABEL_KEYS.every((key) => a[key] === b[key]) &&
+  !!a.turnOuter === !!b.turnOuter &&
+  !!a.turnInner === !!b.turnInner &&
+  !!a.push === !!b.push &&
+  !!a.longPush === !!b.longPush;
+
+/**
+ * Keeps the dock's handlers fresh while the same knob stays selected, and
+ * redraws the dock when the knob's function (its labels) changes, e.g. a
+ * GTN knob that tunes COM on one page and zooms the map on another.
+ */
 export function refreshDock(k: KnobHandlers): void {
-  if (current?.id === k.id) {
-    current = k;
-  }
+  if (current?.id !== k.id) return;
+  const changed = !sameLabels(current, k);
+  current = k;
+  if (changed) for (const l of listeners) l(current);
 }
 
 export function closeDock(): void {

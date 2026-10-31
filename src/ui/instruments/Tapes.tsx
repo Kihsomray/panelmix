@@ -22,6 +22,25 @@ export interface SpeedTapeProps {
 }
 
 /**
+ * The value a mechanical counter shows: it holds each step, then rolls over
+ * in the last quarter of it.
+ */
+export function drumValue(value: number, step: number): number {
+  const base = Math.floor(value / step) * step;
+  const frac = Math.min(Math.max(((value - base) / step - 0.75) / 0.25, 0), 1);
+  return base + frac * step;
+}
+
+/**
+ * The leading digits beside a drum: they carry once the drum is more than
+ * half way into its roll, so 3,499.9 ft (drum almost showing "00") reads
+ * 35 rather than 34, and holding 3,500 ft never flickers to "3400".
+ */
+export function leadingDigits(value: number, step: number, drumSpan: number): number {
+  return Math.floor((Math.round(drumValue(value, step) / step) * step) / drumSpan);
+}
+
+/**
  * Digit drum for the last digits of a readout: as the value changes the
  * digits roll past, with only the current one fully inside the window.
  */
@@ -45,9 +64,9 @@ function RollingDigits({
   pitch: number;
 }) {
   const mod = 10 ** digits;
-  const base = Math.floor(value / step) * step;
-  // Like a mechanical counter: the drum holds still, then rolls over in the last quarter of each step.
-  const frac = Math.min(Math.max(((value - base) / step - 0.75) / 0.25, 0), 1);
+  const shown = drumValue(value, step);
+  const base = Math.floor(shown / step) * step;
+  const frac = (shown - base) / step;
   const items = [];
   for (let k = -2; k <= 2; k++) {
     const v = base + k * step;
@@ -126,7 +145,7 @@ export function SpeedTape(p: SpeedTapeProps) {
         ) : (
           <>
             <text x={w - 22 - font * 0.66} y={cy + font * 0.45} text-anchor="end" font-size={font * 1.25} fill={AV.white}>
-              {Math.floor(iasKt / 10)}
+              {leadingDigits(iasKt, 1, 10)}
             </text>
             <RollingDigits value={iasKt} step={1} digits={1} x={w - 22} cy={cy + font * 0.09} font={font * 1.25} pitch={boxH} />
           </>
@@ -170,7 +189,7 @@ export function AltitudeTape(p: AltitudeTapeProps) {
   }
   const boxH = font * 2.1;
   const clipId = `alt-${p.id}`;
-  const thousands = Math.floor(Math.abs(altitudeFt) / 100);
+  const thousands = leadingDigits(Math.abs(altitudeFt), 20, 100);
   const trend = p.trendFt ?? altitudeFt;
   return (
     <g class="altitude-tape">

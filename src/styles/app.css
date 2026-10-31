@@ -282,6 +282,7 @@ button {
   display: flex;
   gap: 18px;
   align-items: flex-start;
+  justify-content: center;
 }
 
 .panel-stage.is-one-col {
@@ -297,12 +298,8 @@ button {
   min-width: 0;
 }
 
-.panel-stage.is-two-col .panel-col-left {
-  flex: 1 1 auto;
-}
-
-.panel-stage.is-two-col .panel-col-right {
-  flex: 1 1 auto;
+.panel-stage.is-two-col .panel-col {
+  flex: none;
 }
 
 .panel-stage.is-one-col .panel-col {
@@ -359,6 +356,11 @@ button {
   left: 50%;
   top: calc(env(safe-area-inset-top) + 64px);
   transform: translateX(-50%);
+  max-width: none;
+  /* Tall units on short screens scroll inside the focus view. */
+  max-height: calc(100dvh - 64px - var(--simbar-h) - env(safe-area-inset-bottom) - env(safe-area-inset-top) - 12px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 8px 10px 12px;
   border-radius: 16px;
   background: #15171a;

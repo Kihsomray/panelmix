@@ -46,6 +46,11 @@ export function KnobDock() {
             {knob.pushLabel ?? 'Push'}
           </button>
         )}
+        {knob.longPush && (
+          <button type="button" class="knob-dock-push" onClick={() => live().longPush?.()}>
+            {knob.longPushLabel ?? 'Push and hold'}
+          </button>
+        )}
       </div>
     </div>
   );

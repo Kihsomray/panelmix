@@ -1,0 +1,153 @@
+/* Aspen Evolution EFD1000 PFD: bezel, keys and display text. -------------------- */
+
+.aspen-pfd {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, #4a4950 0%, #3a393f 6%, #2c2b30 12%, #26252a 70%, #1f1e22 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    inset 0 -3px 6px rgb(0 0 0 / 0.5),
+    0 8px 22px rgb(0 0 0 / 0.55);
+}
+
+.aspen-logo {
+  position: absolute;
+  left: 22px;
+  top: 20px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #6f9fd8;
+  font: 600 13px/1 var(--av);
+  letter-spacing: 0.32em;
+  pointer-events: none;
+}
+
+.aspen-logo svg {
+  display: block;
+}
+
+.aspen-evolution {
+  position: absolute;
+  right: 12px;
+  top: 22px;
+  color: #c9ccd2;
+  font: 600 11px/1 var(--av);
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+
+.aspen-screen {
+  box-shadow:
+    0 0 0 3px #0b0b0c,
+    0 0 0 4px #3e3d43,
+    inset 0 0 10px rgb(0 0 0 / 0.8);
+}
+
+.aspen-display {
+  position: absolute;
+  inset: 0;
+}
+
+.aspen-svg {
+  display: block;
+}
+
+.aspen-svg text {
+  font-family: var(--av);
+  font-weight: 600;
+}
+
+.aspen-halo {
+  paint-order: stroke;
+  stroke: rgb(0 0 0 / 0.7);
+  stroke-width: 3px;
+}
+
+.aspen-key {
+  border-radius: 5px;
+}
+
+.aspen-rev .bezel-btn-label {
+  color: #ff4a4a;
+}
+
+.aspen-vertical {
+  display: block;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  font-size: 10px;
+  letter-spacing: -0.05em;
+}
+
+.aspen-keymark {
+  display: block;
+  width: 12px;
+  height: 3px;
+  border-radius: 1px;
+  background: #e8e8e8;
+}
+
+.aspen-keymark-v {
+  width: 3px;
+  height: 11px;
+}
+
+.aspen-nav-left {
+  clip-path: polygon(10% 0, 100% 0, 100% 100%, 0 100%);
+}
+
+.aspen-nav-center {
+  clip-path: polygon(0 0, 100% 0, 92% 100%, 8% 100%);
+}
+
+.aspen-nav-right {
+  clip-path: polygon(0 0, 90% 0, 100% 100%, 0 100%);
+}
+
+.aspen-rng {
+  position: absolute;
+  left: 314px;
+  top: 182px;
+  width: 28px;
+  text-align: center;
+  color: #d6d7da;
+  font: 600 9px/1 var(--av);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+.aspen-photocell {
+  position: absolute;
+  left: 8px;
+  top: 604px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #c9a27a, #6b4a2a 70%);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.6);
+}
+
+.aspen-knob-mark {
+  position: absolute;
+  width: 40px;
+  margin: -10px 0 0 -20px;
+  text-align: center;
+  color: #e4e5e7;
+  font: 700 7.5px/10px var(--av);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.aspen-sd {
+  position: absolute;
+  left: 153px;
+  top: 688px;
+  width: 44px;
+  height: 4px;
+  border-radius: 2px;
+  background: #050506;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.07);
+}

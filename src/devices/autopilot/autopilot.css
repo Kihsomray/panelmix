@@ -1,0 +1,322 @@
+/* Autopilots: Bendix/King KAP 140 and Garmin GFC 500 (GMC 507). ----------------- */
+
+/* KAP 140 --------------------------------------------------------------------------- */
+
+.ap-kap {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.07), transparent 25%),
+    linear-gradient(180deg, #47484b, #343538);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    inset 0 -2px 5px rgb(0 0 0 / 0.45),
+    0 6px 18px rgb(0 0 0 / 0.55);
+}
+
+/* The light pin-stripe just inside the bezel edge. */
+.ap-kap-border {
+  position: absolute;
+  inset: 5px;
+  border: 1.5px solid #b9babc;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.ap-kap-brand {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  color: #f2f2f2;
+  font: italic 700 9px/1 var(--av);
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+.ap-kap-model {
+  position: absolute;
+  left: 24px;
+  top: 25px;
+  color: #f2f2f2;
+  font: 700 9px/1 var(--av);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.ap-kap-photocell {
+  position: absolute;
+  left: 29px;
+  top: 66px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #f0f0f0, #9a9b9d 45%, #3a3b3d);
+  box-shadow: 0 0 0 1px #2a2b2d;
+  pointer-events: none;
+}
+
+/* Pitch (P) and roll (R) failure lights: dark unless an axis fails. */
+.ap-kap-fail {
+  position: absolute;
+  top: 100px;
+  color: #3d2624;
+  font: 700 11px/1 var(--av);
+  pointer-events: none;
+}
+
+.ap-kap-lcd {
+  position: absolute;
+  width: 361px;
+  height: 77px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #0d0a08, #050403);
+  box-shadow:
+    0 0 0 2px #1c1c1d,
+    inset 0 3px 8px rgb(0 0 0 / 0.9);
+  overflow: hidden;
+}
+
+.ap-lcd {
+  display: block;
+}
+
+/* Lit segments: amber strokes with a little glow, as on the backlit LCD. */
+.ap-lcd-lit {
+  filter: drop-shadow(0 0 1.2px rgb(255 140 30 / 0.7));
+}
+
+.ap-lcd-seg-path {
+  fill: none;
+  stroke: #ff9326;
+  stroke-width: 2.2;
+  stroke-linecap: butt;
+}
+
+.ap-lcd-dot {
+  fill: #ff9326;
+}
+
+/* Fixed legends (AP, ARM, PT, ALERT, units): nearly invisible until lit. */
+.ap-lcd-label text {
+  fill: #170f09;
+  font: 700 9.5px var(--av);
+  letter-spacing: 0.08em;
+}
+
+.ap-lcd-label .ap-lcd-ap {
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.ap-lcd-small text {
+  font-size: 8px;
+}
+
+.ap-lcd-box {
+  fill: none;
+  stroke: #170f09;
+  stroke-width: 1.4;
+}
+
+.ap-lcd-fill {
+  fill: #170f09;
+}
+
+.ap-lcd-label.is-on {
+  filter: drop-shadow(0 0 1.2px rgb(255 140 30 / 0.6));
+}
+
+.ap-lcd-label.is-on text,
+.ap-lcd-label.is-on .ap-lcd-fill {
+  fill: #ff9326;
+}
+
+.ap-lcd-label.is-on .ap-lcd-box {
+  stroke: #ff9326;
+}
+
+.bezel-btn.ap-kap-key {
+  background: linear-gradient(180deg, #f1f1f0, #c9c9c7);
+  border-radius: 2px;
+  color: #141414;
+  font-size: 10.5px;
+  font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.85),
+    1px 2px 0 #1c1c1d,
+    0 3px 4px rgb(0 0 0 / 0.35);
+}
+
+.ap-kap-dot {
+  position: absolute;
+  left: 252px;
+  top: 133px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #303133, #0b0b0c);
+  pointer-events: none;
+}
+
+.ap-kap-screw {
+  position: absolute;
+  left: 482px;
+  top: 30px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background:
+    linear-gradient(180deg, transparent 44%, #1d1d1e 44% 58%, transparent 58%),
+    radial-gradient(circle at 40% 35%, #6c6d70, #3a3b3d);
+  pointer-events: none;
+}
+
+.ap-kap-updn-frame {
+  position: absolute;
+  left: 465px;
+  top: 61px;
+  width: 50px;
+  height: 92px;
+  border: 1.5px solid #c9cacc;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* GMC 507 ---------------------------------------------------------------------------- */
+
+.ap-gmc {
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.06), transparent 22%),
+    linear-gradient(180deg, #252629, #17181a);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    inset 0 -2px 5px rgb(0 0 0 / 0.55),
+    0 6px 18px rgb(0 0 0 / 0.55);
+}
+
+.ap-gmc-face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ap-gmc-divider {
+  stroke: #c9ccd0;
+  stroke-width: 1.4;
+}
+
+.ap-gmc-title {
+  fill: #eeeff1;
+  font: 600 12.5px var(--av);
+  letter-spacing: 0.04em;
+  text-anchor: middle;
+}
+
+.ap-gmc-small {
+  fill: #e4e5e7;
+  font: 600 8.5px var(--av);
+  letter-spacing: 0.06em;
+  text-anchor: middle;
+}
+
+.ap-gmc-arrow {
+  fill: none;
+  stroke: #e4e5e7;
+  stroke-width: 1.3;
+}
+
+.ap-gmc-screw {
+  fill: #050505;
+}
+
+.ap-gmc-photocell {
+  fill: #6b6d70;
+  stroke: #2e2f32;
+}
+
+.ap-gmc-slot {
+  fill: #0a0a0b;
+  stroke: #303134;
+}
+
+/* Mode annunciator: a small triangle above each key. */
+.ap-gmc-led {
+  fill: #222326;
+}
+
+.ap-gmc-led.is-on {
+  fill: #f4fbf6;
+  filter: drop-shadow(0 0 3px rgb(220 255 235 / 0.9));
+}
+
+.bezel-btn.ap-gmc-key {
+  background: linear-gradient(180deg, #303235, #1d1e21);
+  border-radius: 7px;
+  color: #f2f3f4;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    0 2px 0 #060607,
+    0 3px 6px rgb(0 0 0 / 0.5);
+}
+
+.bezel-btn.ap-gmc-lvl {
+  background: linear-gradient(180deg, #49b8ea, #2591c9);
+}
+
+.ap-gmc-boxed {
+  display: inline-block;
+  padding: 3px 7px 2px;
+  border: 1.4px solid #e9eaec;
+  border-radius: 2px;
+}
+
+.ap-gmc-lvl .ap-gmc-boxed {
+  border-color: #1b1d20;
+  background: #1f2124;
+}
+
+.ap-gmc-wheel {
+  position: absolute;
+  border-radius: 14px;
+  touch-action: none;
+  cursor: ns-resize;
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.6));
+}
+
+.ap-gmc-wheel svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ap-gmc-wheel-body {
+  fill: #2d2e31;
+}
+
+.ap-gmc-ridge {
+  stroke: #0e0e0f;
+  stroke-width: 1.6;
+}
+
+.ap-gmc-wheel-shade {
+  stroke: #0b0b0c;
+  stroke-width: 1;
+}
+
+.ap-gmc-wheel:focus-visible {
+  outline: 2px solid #6aa7ff;
+  outline-offset: 3px;
+}
+
+.ap-gmc-wheel.is-docked {
+  filter: drop-shadow(0 0 6px rgb(106 167 255 / 0.95));
+}

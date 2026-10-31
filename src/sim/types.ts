@@ -134,6 +134,13 @@ export interface AutopilotState {
   readonly vertical: VerticalMode;
   /** Altitude preselect armed: captures `bugs.altitudeFt`. */
   readonly altitudeArmed: boolean;
+  /**
+   * NAV armed: the current lateral mode (ROL or HDG) flies until the CDI
+   * needle comes within half scale, then NAV captures. PFDs annunciate it in white.
+   */
+  readonly lateralArmed: 'NAV' | null;
+  /** GPS steering: in HDG mode the autopilot follows the GPS course instead of the bug. */
+  readonly gpss: boolean;
   /** Pitch held in PIT mode. */
   readonly pitchRefDeg: number;
   /** Altitude held in ALT mode. */

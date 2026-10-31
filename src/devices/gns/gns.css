@@ -1,0 +1,482 @@
+/* Garmin GNS 430W / 530W ---------------------------------------------------------- */
+
+.gns-unit {
+  position: absolute;
+  inset: 0;
+}
+
+.gns-bezel {
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.07), transparent 18%),
+    linear-gradient(180deg, #313236, #222326 55%, #1b1c1f);
+}
+
+/* The dark recess the glass and the bottom keys sit in. */
+.gns-window,
+.gns-shelf {
+  position: absolute;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #151618, #1e1f22);
+  box-shadow:
+    inset 0 3px 7px rgb(0 0 0 / 0.85),
+    inset 0 -1px 0 rgb(255 255 255 / 0.05),
+    0 1px 0 rgb(255 255 255 / 0.07);
+}
+
+.gns-shelf {
+  border-radius: 0 0 12px 12px;
+}
+
+.gns-logo {
+  position: absolute;
+  color: #ececec;
+  font: italic 800 11.5px/1 var(--av);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+
+.gns-model {
+  position: absolute;
+  color: #e2e2e2;
+  font: 700 9.5px/1 var(--av);
+  letter-spacing: 0.03em;
+  transform: translateX(-100%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.gns-photocell {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #9b8a7a, #4b3f36 55%, #1d1916);
+  box-shadow: 0 0 0 1.5px #0d0d0e;
+}
+
+.gns-slot {
+  position: absolute;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #0e0f10, #232427 50%, #0e0f10);
+  box-shadow:
+    inset 0 2px 4px rgb(0 0 0 / 0.9),
+    0 0 0 1px #0a0a0b;
+}
+
+.gns-slot::after {
+  content: '';
+  position: absolute;
+  background: #3a3b3f;
+}
+
+.gns-slot-v::after {
+  left: 15%;
+  right: 15%;
+  top: 46%;
+  height: 4px;
+  border-radius: 1px;
+}
+
+.gns-slot-h::after {
+  top: 15%;
+  bottom: 15%;
+  left: 66%;
+  width: 4px;
+  border-radius: 1px;
+}
+
+.gns-hole {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 40%, #000, #111 70%, #2a2a2c);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+/* Lettering printed on the bezel. */
+.gns-print {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  color: #e6e6e6;
+  font: 600 7.5px/1.05 var(--av);
+  letter-spacing: 0.02em;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.gns-print small {
+  font-size: 5.5px;
+}
+
+.gns-print sup {
+  font-size: 5.5px;
+  vertical-align: 3px;
+}
+
+.gns-print-big {
+  font-size: 11px;
+}
+
+.gns-defnav-line {
+  position: absolute;
+  border-color: #d8d8d8;
+  border-style: solid;
+  pointer-events: none;
+}
+
+/* Text printed on the push knobs' caps. */
+.gns-cap {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  color: #f1f1f1;
+  font: 700 8.5px/1.05 var(--av);
+  text-align: center;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* Keys -------------------------------------------------------------------------- */
+
+.gns-key {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+
+.gns-key .gns-sym {
+  vertical-align: -1px;
+}
+
+.gns-flip-label {
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  font-size: 12px;
+}
+
+.gns-flip-label svg {
+  display: block;
+}
+
+.gns-rng-body {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #4a4c50, #2f3134);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 2px 0 #0d0d0e,
+    0 3px 5px rgb(0 0 0 / 0.45);
+  color: #f1f1f1;
+  font: 600 10.5px/1 var(--av);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.bezel-btn.gns-rng-half {
+  background: transparent;
+  box-shadow: none;
+  font-size: 11px;
+}
+
+.bezel-btn.gns-rng-half.is-pressed {
+  background: rgb(255 255 255 / 0.1);
+}
+
+/* Screen ------------------------------------------------------------------------- */
+
+.gns-glass {
+  background: #000;
+}
+
+.gns-lcd {
+  --gns-blue: #1c38c4;
+  --gns-cyan: #12dcff;
+  --gns-green: #2bf05c;
+  --gns-magenta: #ff40ff;
+  --gns-yellow: #ffe23a;
+  --gns-dim: #7f97de;
+  --gns-freq-label: var(--gns-cyan);
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: hidden;
+  transform-origin: 0 0;
+  background: #000;
+  color: #fff;
+  font-family: var(--av);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.gns-lcd-530 {
+  --gns-freq-label: #fff;
+}
+
+.gns-main {
+  position: absolute;
+  overflow: hidden;
+  background: var(--gns-blue);
+  box-shadow: inset 0 0 0 1px var(--gns-cyan);
+}
+
+.gns-main.is-black {
+  background: #000;
+}
+
+.gns-t {
+  position: absolute;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.gns-t.is-bold {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.c-green {
+  color: var(--gns-green);
+}
+
+.c-cyan {
+  color: var(--gns-cyan);
+}
+
+.c-white {
+  color: #fff;
+}
+
+.c-magenta {
+  color: var(--gns-magenta);
+}
+
+.c-yellow {
+  color: var(--gns-yellow);
+}
+
+.c-dim {
+  color: var(--gns-dim);
+}
+
+.c-blue {
+  color: var(--gns-blue);
+}
+
+.gns-ent-box {
+  padding: 0 1px;
+  box-shadow: inset 0 0 0 1px var(--gns-cyan);
+}
+
+.gns-menu-bar {
+  position: absolute;
+  background: #fff;
+}
+
+/* The cursor: inverse video of the field. */
+.gns-sel {
+  padding: 0 1px;
+  margin: 0 -1px;
+}
+
+.gns-sel-green {
+  background: var(--gns-green);
+  color: #000;
+}
+
+.gns-sel-white,
+.gns-sel-dim,
+.gns-sel-blue {
+  background: #fff;
+  color: var(--gns-blue);
+}
+
+.gns-sel-cyan {
+  background: var(--gns-cyan);
+  color: var(--gns-blue);
+}
+
+.gns-sel-magenta {
+  background: var(--gns-magenta);
+  color: #000;
+}
+
+.gns-sel-yellow {
+  background: var(--gns-yellow);
+  color: #000;
+}
+
+.gns-box,
+.gns-panel {
+  position: absolute;
+  overflow: hidden;
+  background: #000;
+  box-shadow: inset 0 0 0 1px var(--gns-cyan);
+}
+
+.gns-panel {
+  background: var(--gns-blue);
+}
+
+.gns-line {
+  position: absolute;
+  background: var(--gns-cyan);
+}
+
+.gns-u {
+  display: inline-flex;
+  flex-direction: column;
+  margin-left: 0.04em;
+  font-size: 0.44em;
+  font-weight: 700;
+  line-height: 0.92;
+  vertical-align: 0.95em;
+  text-align: center;
+}
+
+.gns-u b {
+  font-weight: inherit;
+}
+
+.gns-sym {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.gns-entry-cursor {
+  background: var(--gns-green);
+  color: #000;
+  animation: gns-flash 0.9s steps(1, end) infinite;
+}
+
+.gns-blink {
+  animation: gns-blink 1s steps(1, end) infinite;
+}
+
+@keyframes gns-flash {
+  50% {
+    background: transparent;
+    color: var(--gns-green);
+  }
+}
+
+@keyframes gns-blink {
+  50% {
+    visibility: hidden;
+  }
+}
+
+/* Frequency column. */
+.gns-freq-active,
+.gns-freq-standby {
+  position: absolute;
+  right: 3px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.gns-freq-standby {
+  color: var(--gns-cyan);
+}
+
+/* The tuning cursor: a cyan bar across the window with the standby frequency in blue. */
+.gns-freq-standby.is-cursor {
+  left: 1px;
+  right: 1px;
+  padding-right: 2px;
+  text-align: right;
+  background: var(--gns-cyan);
+  color: var(--gns-blue);
+}
+
+.gns-dim-value {
+  opacity: 0.5;
+}
+
+.gns-freq-standby small,
+.gns-freq-active small {
+  font-size: 0.78em;
+}
+
+.gns-vol-bar {
+  position: absolute;
+  height: 3px;
+  background: rgb(255 255 255 / 0.25);
+}
+
+.gns-vol-bar i {
+  display: block;
+  height: 100%;
+  background: #fff;
+}
+
+/* Page indicator squares. */
+.gns-indicator {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  background: var(--gns-blue);
+}
+
+.gns-indicator i {
+  display: inline-block;
+  margin-right: 1px;
+  box-shadow: inset 0 0 0 1px var(--gns-cyan);
+}
+
+.gns-indicator i.is-on {
+  background: #fff;
+  box-shadow: none;
+}
+
+.gns-advisory {
+  position: absolute;
+  background: #fff;
+  color: #000;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Windows over the page: the page behind is dimmed. */
+.gns-dim {
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-conic-gradient(rgb(0 0 0 / 0.55) 0 25%, transparent 0 50%) 0 0 / 2px 2px;
+}
+
+.gns-window-box {
+  position: absolute;
+  background: var(--gns-blue);
+  box-shadow:
+    inset 0 0 0 1px #fff,
+    inset 0 0 0 2px var(--gns-blue),
+    inset 0 0 0 3px var(--gns-cyan);
+}
+
+.gns-scrollbar {
+  position: absolute;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px var(--gns-cyan);
+}
+
+.gns-scrollbar i {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  border-radius: 1px;
+  background: var(--gns-cyan);
+}
+
+.gns-canvas-host {
+  position: absolute;
+  overflow: hidden;
+  background: #000;
+}
+
+.gns-svg {
+  position: absolute;
+  overflow: visible;
+}

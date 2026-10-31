@@ -14,7 +14,7 @@ type Plain = Record<string, unknown>;
 const isPlain = (v: unknown): v is Plain => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** State fields that may legitimately be null. */
-const NULLABLE = new Set(['activeLeg', 'minimumsFt', 'identUntil']);
+const NULLABLE = new Set(['activeLeg', 'minimumsFt', 'identUntil', 'lateralArmed']);
 /** Arrays whose length varies; every other array is a fixed tuple (two radios, two tanks). */
 const OPEN_LISTS = new Set(['plan', 'messages']);
 

@@ -148,6 +148,7 @@ export class Simulator {
       trackMag: d.trackMag,
       sigma: d.sigma,
       cdi: d.cdi,
+      gps: d.gps,
       vorDistanceNm: d.cdi.source === 'GPS' ? null : distanceToStation(d, s),
     });
 
@@ -189,6 +190,7 @@ export class Simulator {
       trackMag: norm360(a.trackTrue - magVar),
       sigma,
       cdi,
+      gps,
       vorDistanceNm: null,
     });
     const windRelativeDeg = norm360(s.env.windFromTrue - a.headingTrue);

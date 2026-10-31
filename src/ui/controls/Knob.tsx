@@ -28,6 +28,8 @@ export interface KnobProps {
   readonly outerLabel?: string;
   readonly innerLabel?: string;
   readonly pushLabel?: string;
+  /** Name of the push-and-hold action in the touch dock ("Sync", "Flip-flop"). */
+  readonly longPushLabel?: string;
   /** Large (outer) knob, dual knobs only. */
   readonly onOuter?: (steps: number) => void;
   /** Small (inner) knob, or the only knob. */
@@ -68,6 +70,8 @@ export function Knob(props: KnobProps) {
       ...(turnOuter && { turnOuter: (n: number) => turn('outer', n) }),
       ...(turnInner && { turnInner: (n: number) => turn('inner', n) }),
       ...(p.onPush && { push: () => latest.current.onPush?.() }),
+      ...(p.onLongPush && { longPush: () => latest.current.onLongPush?.() }),
+      ...(p.longPushLabel !== undefined && { longPushLabel: p.longPushLabel }),
     };
   };
 

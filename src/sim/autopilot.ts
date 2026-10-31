@@ -1,5 +1,6 @@
 import { angleDiff } from '../core/geo';
 import { excessPowerFpm, pitchForVerticalSpeed, verticalSpeedForPitch, type FlightTargets } from './flight';
+import type { GpsSolution } from './fms';
 import type { CdiSolution } from './radionav';
 import type { AutopilotState, SimState } from './types';
 
@@ -26,7 +27,40 @@ export interface GuidanceInput {
   readonly trackMag: number;
   readonly sigma: number;
   readonly cdi: CdiSolution;
+  /** The GPS solution, for GPS steering whatever the CDI source. */
+  readonly gps: GpsSolution;
   readonly vorDistanceNm: number | null;
+}
+
+/** NAV captures once the needle is within half scale (one dot of two on an HSI). */
+export const NAV_CAPTURE_NEEDLE = 0.5;
+
+/** The course to fly and the cross-track error, from a CDI-like source. */
+interface Track {
+  readonly courseMag: number;
+  readonly xtkNm: number;
+}
+
+function trackFromCdi(cdi: CdiSolution, vorDistanceNm: number | null): Track | null {
+  if (cdi.flag) return null;
+  // Convert needle deflection back to a cross-track distance so one law flies GPS and VOR.
+  const xtkNm =
+    cdi.fullScaleNm !== null
+      ? -cdi.needle * cdi.fullScaleNm
+      : -cdi.needle * 10 * Math.max(vorDistanceNm ?? 10, 1) * (Math.PI / 180);
+  return { courseMag: cdi.courseMag, xtkNm };
+}
+
+function trackFromGps(gps: GpsSolution): Track | null {
+  if (!gps.active || gps.dtkMag === null) return null;
+  return { courseMag: gps.dtkMag, xtkNm: gps.crossTrackNm };
+}
+
+/** Intercept-and-track law: bank toward a desired track that closes on the course. */
+function steer(track: Track, trackMag: number): number {
+  const intercept = clamp(track.xtkNm * XTK_GAIN_DEG_PER_NM, -MAX_INTERCEPT, MAX_INTERCEPT);
+  const desiredTrack = track.courseMag - intercept;
+  return clamp(ROLL_GAIN * angleDiff(desiredTrack, trackMag), -AP_MAX_BANK, AP_MAX_BANK);
 }
 
 /** Bank command for the lateral mode. */
@@ -35,19 +69,15 @@ function lateralCommand(ap: AutopilotState, input: GuidanceInput): number {
   switch (ap.lateral) {
     case 'ROL':
       return ap.rollRefDeg;
-    case 'HDG':
+    case 'HDG': {
+      // GPS steering: a heading-only autopilot fed GPS roll steering follows the GPS course.
+      const gpss = ap.gpss ? trackFromGps(input.gps) : null;
+      if (gpss) return steer(gpss, trackMag);
       return clamp(ROLL_GAIN * angleDiff(state.bugs.headingMag, headingMag), -AP_MAX_BANK, AP_MAX_BANK);
+    }
     case 'NAV': {
-      if (cdi.flag) return 0;
-      // Convert needle deflection back to a cross-track distance so one law flies GPS and VOR.
-      const xtkNm =
-        cdi.fullScaleNm !== null
-          ? -cdi.needle * cdi.fullScaleNm
-          : -cdi.needle * 10 * Math.max(input.vorDistanceNm ?? 10, 1) * (Math.PI / 180);
-      const intercept = clamp(xtkNm * XTK_GAIN_DEG_PER_NM, -MAX_INTERCEPT, MAX_INTERCEPT);
-      // Flying TO a VOR the course is flown as set; FROM likewise. The needle sign handles both.
-      const desiredTrack = cdi.courseMag - intercept;
-      return clamp(ROLL_GAIN * angleDiff(desiredTrack, trackMag), -AP_MAX_BANK, AP_MAX_BANK);
+      const track = trackFromCdi(cdi, input.vorDistanceNm);
+      return track ? steer(track, trackMag) : 0;
     }
   }
 }
@@ -88,6 +118,13 @@ export function guidance(input: GuidanceInput): GuidanceOutput {
   const { state } = input;
   let ap = state.ap;
   const a = state.aircraft;
+
+  // NAV capture: once the needle comes within half scale, the armed NAV becomes active.
+  if (ap.lateralArmed && (ap.engaged || ap.flightDirector) && ap.lateral !== 'NAV') {
+    if (!input.cdi.flag && Math.abs(input.cdi.needle) <= NAV_CAPTURE_NEEDLE) {
+      ap = { ...ap, lateral: 'NAV', lateralArmed: null };
+    }
+  }
 
   if (ap.altitudeArmed && (ap.engaged || ap.flightDirector) && ap.vertical !== 'ALT') {
     const toGo = state.bugs.altitudeFt - a.altitudeFt;

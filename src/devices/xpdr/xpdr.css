@@ -1,0 +1,284 @@
+/* Transponders: Garmin GTX 345 and Bendix/King KT 76A. ------------------------ */
+
+/* GTX 345 ------------------------------------------------------------------------ */
+
+.xpdr-gtx {
+  position: absolute;
+  inset: 0;
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.07), transparent 18%),
+    linear-gradient(180deg, #2b2c2f, #1c1d1f);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    inset 0 -2px 5px rgb(0 0 0 / 0.55),
+    0 6px 18px rgb(0 0 0 / 0.55);
+}
+
+.xpdr-gtx-glass {
+  position: absolute;
+  left: 130px;
+  top: 11px;
+  width: 366px;
+  height: 87px;
+  border-radius: 5px;
+  background: #030303;
+  box-shadow:
+    0 0 0 2px #121315,
+    inset 0 3px 10px rgb(0 0 0 / 0.95);
+}
+
+.xpdr-gtx-brand {
+  position: absolute;
+  right: 18px;
+  top: 6px;
+  color: #ececec;
+  font: 700 10.5px/1 var(--av);
+  letter-spacing: 0.14em;
+  pointer-events: none;
+}
+
+.xpdr-gtx-sensor {
+  position: absolute;
+  left: 509px;
+  top: 13px;
+  width: 13px;
+  height: 8px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #4a4c4f, #2a2b2d);
+  pointer-events: none;
+}
+
+.xpdr-gtx-photocell {
+  position: absolute;
+  left: 487px;
+  top: 130px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #303133, #0d0d0e);
+  pointer-events: none;
+}
+
+.bezel-btn.xpdr-gtx-key {
+  background: linear-gradient(180deg, #3d3f43, #25272a);
+  border-radius: 5px;
+  color: #f4f4f4;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.bezel-btn.xpdr-gtx-idnt {
+  border-radius: 50%;
+  font-size: 10.5px;
+}
+
+/* Mode keys sit on a ring around IDNT, each turned to follow the ring. */
+.bezel-btn.xpdr-gtx-ring {
+  border-radius: 45% 45% 35% 35% / 70% 70% 45% 45%;
+  font-size: 10px;
+  transform: rotate(var(--ring-rot));
+}
+
+.bezel-btn.xpdr-gtx-ring.is-pressed {
+  transform: rotate(var(--ring-rot)) scale(0.94);
+}
+
+.xpdr-gtx-ring-on {
+  --ring-rot: 0deg;
+}
+
+.xpdr-gtx-ring-alt {
+  --ring-rot: 72deg;
+}
+
+.xpdr-gtx-ring-sby {
+  --ring-rot: -72deg;
+}
+
+/* The lower keys face the ring center, so their labels stay upright. */
+.xpdr-gtx-ring-vfr {
+  --ring-rot: -36deg;
+  border-radius: 35% 35% 45% 45% / 45% 45% 70% 70%;
+}
+
+.xpdr-gtx-ring-off {
+  --ring-rot: 36deg;
+  border-radius: 35% 35% 45% 45% / 45% 45% 70% 70%;
+}
+
+/* KT 76A ---------------------------------------------------------------------------- */
+
+.xpdr-kt {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 20%),
+    linear-gradient(180deg, #1a1a1b, #0e0e0f);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -2px 5px rgb(0 0 0 / 0.6),
+    0 6px 18px rgb(0 0 0 / 0.55);
+}
+
+.xpdr-kt-face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.xpdr-kt-line {
+  fill: none;
+  stroke: #d6d6d6;
+  stroke-width: 1.6;
+}
+
+.xpdr-kt-label {
+  fill: #e6e6e6;
+  font: 600 9.5px var(--av);
+  letter-spacing: 0.04em;
+}
+
+.xpdr-kt-model {
+  fill: #e6e6e6;
+  font: 600 11px var(--av);
+  letter-spacing: 0.05em;
+}
+
+.xpdr-kt-brand {
+  fill: #f0f0f0;
+  font: italic 700 12px var(--av);
+  letter-spacing: 0.08em;
+}
+
+.xpdr-kt-lamp {
+  position: absolute;
+  left: 165px;
+  top: 33px;
+  width: 30px;
+  height: 21px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #3a1d0c, #241005);
+  box-shadow:
+    inset 0 0 0 1px #000,
+    inset 0 2px 4px rgb(0 0 0 / 0.7);
+}
+
+.xpdr-kt-lamp.is-lit {
+  background: radial-gradient(circle at 50% 45%, #ffd27a, #ff9a1a 55%, #d0620a);
+  box-shadow:
+    inset 0 0 0 1px #3a1800,
+    0 0 10px rgb(255 160 40 / 0.85),
+    0 0 22px rgb(255 140 20 / 0.45);
+}
+
+.bezel-btn.xpdr-kt-ident {
+  background: radial-gradient(circle at 40% 35%, #6a2a24, #3a1210);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.15),
+    0 2px 0 #050505,
+    0 0 0 2px #1d1d1e;
+}
+
+.xpdr-kt-photocell {
+  position: absolute;
+  left: 228px;
+  top: 138px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #050505;
+  box-shadow: 0 0 0 1px #2a2a2a;
+  pointer-events: none;
+}
+
+.xpdr-kt-window {
+  position: absolute;
+  left: 236px;
+  top: 17px;
+  width: 378px;
+  height: 62px;
+  border-radius: 3px;
+  background: #050505;
+  box-shadow:
+    inset 0 0 0 1px #000,
+    inset 0 4px 10px rgb(0 0 0 / 0.95),
+    0 0 0 1px #2c2c2c;
+  overflow: hidden;
+}
+
+.xpdr-kt-drum {
+  position: absolute;
+  top: 5px;
+  width: 38px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #000 0%, #1d1d1e 22%, #2a2a2b 50%, #1d1d1e 78%, #000 100%);
+  color: #f6f6f6;
+  font: 600 34px/1 var(--av);
+  text-align: center;
+}
+
+.xpdr-kt-drum-digit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 9px;
+}
+
+/* The neighbouring numbers on the drum, curving away at the window edges. */
+.xpdr-kt-drum-edge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  opacity: 0.32;
+  transform: scaleY(0.55);
+}
+
+.xpdr-kt-drum-edge.is-top {
+  top: -24px;
+}
+
+.xpdr-kt-drum-edge.is-bottom {
+  top: 42px;
+}
+
+/* The selector wraps the kit knob to draw its own pointer over it. */
+.xpdr-kt-selector {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.xpdr-kt-selector .knob {
+  pointer-events: auto;
+}
+
+.xpdr-kt-selector .knob-mark {
+  display: none;
+}
+
+.xpdr-kt-pointer {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.xpdr-kt-pointer line {
+  stroke: #f2f2f2;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.xpdr-kt-pointer circle {
+  fill: none;
+  stroke: #d8d8d8;
+  stroke-width: 1.4;
+}

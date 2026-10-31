@@ -85,6 +85,8 @@ export function initialSimState(): SimState {
       lateral: 'ROL',
       vertical: 'PIT',
       altitudeArmed: false,
+      lateralArmed: null,
+      gpss: false,
       pitchRefDeg: cruisePitch,
       altitudeRefFt: START.altitudeFt,
       rollRefDeg: 0,

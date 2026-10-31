@@ -18,8 +18,12 @@ export interface BezelButtonProps {
   /** Spoken name when the printed label isn't enough ("Direct-to"). */
   readonly ariaLabel?: string;
   readonly onPress: () => void;
-  /** Fired instead of onPress when held for 700 ms. */
+  /** Fired instead of onPress when held for `holdMs`. */
   readonly onLongPress?: () => void;
+  /** How long counts as a hold, ms (default 700; Garmin COM flip-flop uses 2000). */
+  readonly holdMs?: number;
+  /** Called when the key is let go, after onPress or onLongPress (UP/DN keys that act while held). */
+  readonly onRelease?: () => void;
   /** Repeats onPress while held (after 400 ms, every 120 ms). */
   readonly repeat?: boolean;
   readonly shape?: 'rect' | 'round' | 'pill';
@@ -42,6 +46,7 @@ export function BezelButton(p: BezelButtonProps) {
   latest.current = p;
   const timers = useRef<number[]>([]);
   const consumed = useRef(false);
+  const pressedRef = useRef(false);
 
   const clearTimers = () => {
     for (const t of timers.current) {
@@ -55,13 +60,14 @@ export function BezelButton(p: BezelButtonProps) {
   const onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0 || latest.current.disabled) return;
     consumed.current = false;
+    pressedRef.current = true;
     setPressed(true);
     if (latest.current.onLongPress) {
       timers.current.push(
         window.setTimeout(() => {
           consumed.current = true;
           latest.current.onLongPress?.();
-        }, LONG_MS),
+        }, latest.current.holdMs ?? LONG_MS),
       );
     } else if (latest.current.repeat) {
       timers.current.push(
@@ -75,8 +81,11 @@ export function BezelButton(p: BezelButtonProps) {
   };
 
   const release = () => {
+    if (!pressedRef.current) return;
+    pressedRef.current = false;
     setPressed(false);
     clearTimers();
+    latest.current.onRelease?.();
   };
 
   const shape = p.shape ?? 'rect';
