@@ -13,25 +13,21 @@ Read `src/devices/steam/` first: it is the reference device.
 - Preact + TypeScript (strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), Vite, Vitest.
 - No new npm dependencies.
 - Commands (run from the repo root):
-  - `npx tsc --noEmit` (typecheck; ignore errors in folders you don't own, but fix all of yours)
-  - `npx vitest run src/devices/<your-folder>` (your tests)
-  - `npx vite --port <your-port> --strictPort --host 127.0.0.1` (dev server; run it in the background)
-  - Screenshot: `node ../tools/shot.mjs "<url>" /tmp/<name>.png dark <width> 0 "<playwright actions js>" <height>`
-    (prints console errors; `page` is a Playwright page). Look at every screenshot you take.
-  - Pick the panel with the URL hash, e.g. `http://127.0.0.1:5181/#pfd=steam&nav=gns430w&xpdr=gtx345&ap=none`.
+  - `npx tsc --noEmit` (typecheck)
+  - `npx vitest run src/devices/<folder>` (a device's tests), `npm run check` (everything)
+  - `npm run dev` (dev server)
+  - Pick the panel with the URL hash, e.g. `http://localhost:5173/#pfd=steam&nav=gns430w&xpdr=gtx345&ap=none`.
     Device ids: `steam g5 aspen-e1000 g1000-pfd g1000-mfd gns430w gns530w gtn650xi gtn750xi gtx345 kt76a kap140 gfc500`;
     `xpdr` and `ap` also accept `integrated` (GTN- or G1000-controlled transponder, G1000 GFC 700) and `ap=none`.
 
-## Ownership rules (several people work in this repo at once)
+## Keep a device self-contained
 
-- Only create or edit files inside your own device folder(s) under `src/devices/`.
-  That includes your `spec.ts` (fix the size, summary and fill `help`).
-- Do not edit anything in `src/sim`, `src/core`, `src/ui`, `src/shell`, `src/styles`, `src/devices/registry.ts`,
-  `src/devices/types.ts` or another device's folder. If you need a shared change, work around it inside
-  your folder and list the request in your final report.
-- Do not run any git command that writes (no commit, add, stash, checkout, reset). `git diff` and `git status` are fine.
-- Styles: put them in your own CSS file (e.g. `src/devices/gns/gns.css`) imported by your component, with
-  class names prefixed by your family (`gns-`, `gtn-`, `g1000-`, `g5-`, `aspen-`, `xpdr-`, `ap-`).
+- A device lives entirely in its own folder under `src/devices/`, including its `spec.ts` (size, summary,
+  `help`) and its tests. Register it once in `src/devices/registry.ts`.
+- Shared code (`src/sim`, `src/core`, `src/ui`, `src/shell`) changes only when several devices need the
+  same thing; work around one-off needs inside the device folder.
+- Styles go in the device's own CSS file (e.g. `src/devices/gns/gns.css`) imported by its component, with
+  class names prefixed by the family (`gns-`, `gtn-`, `g1000-`, `g5-`, `aspen-`, `xpdr-`, `ap-`).
 - No em dashes or en dashes anywhere (UI text, comments, help). Use a hyphen or rewrite.
 
 ## The device contract (`src/devices/types.ts`)
@@ -96,7 +92,7 @@ so lay everything out with absolute positions in design px. Make the size match 
 
 ## Quality bar
 
-This is graded as principal-engineer work. In order of importance:
+In order of importance:
 
 1. Faithful to the real unit. Research it before building (official pilot's guides are public PDFs; use
    web search and fetch). Bezel layout, key names and positions, knob functions, page names and order,
@@ -111,5 +107,5 @@ This is graded as principal-engineer work. In order of importance:
 5. Looks right at the sizes it will be shown: from about 350 px wide (phone) to 1300 px. Check both.
 6. Accessible: every control has a clear `label` / `ariaLabel`.
 
-When done, run typecheck and your tests, take final screenshots, and report: what works, what is
-approximated or missing (and why), anything you'd want changed in shared code, and the screenshot paths.
+Before calling a device done: typecheck, run the tests, and look at screenshots at phone and desktop
+widths while actually pressing its keys and turning its knobs.

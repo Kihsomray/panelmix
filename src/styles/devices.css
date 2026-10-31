@@ -362,34 +362,6 @@
   font-weight: 700;
 }
 
-/* Placeholder ------------------------------------------------------------------- */
-
-.placeholder-device {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: repeating-linear-gradient(135deg, #1d1e21 0 14px, #212226 14px 28px);
-  border: 2px dashed #3a3c42;
-  color: #9a9ea6;
-  text-align: center;
-}
-
-.placeholder-device div {
-  display: grid;
-  gap: 8px;
-}
-
-.placeholder-device strong {
-  font-size: 28px;
-  color: #e6e7e9;
-}
-
-.placeholder-device span {
-  font-size: 20px;
-}
-
 /* Steam gauges -------------------------------------------------------------------- */
 
 .steam-panel {
