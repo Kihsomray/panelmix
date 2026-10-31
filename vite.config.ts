@@ -1,27 +1,42 @@
 import { createHash } from 'node:crypto';
-import { readdirSync } from 'node:fs';
+import { readdirSync, statSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 
+/** Every file under `dir`, as paths relative to it with forward slashes. */
+function listFiles(dir: string, prefix = ''): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const full = path.join(dir, name);
+    const rel = prefix ? `${prefix}/${name}` : name;
+    return statSync(full).isDirectory() ? listFiles(full, rel) : [rel];
+  });
+}
+
 /**
- * Emits a service worker that precaches the app, its fonts and the navigation
- * data, so the trainer works offline after the first visit. The cache name is
- * a hash of the file list, so each deploy replaces the previous cache.
+ * Writes a service worker that precaches the app, its fonts and the
+ * navigation data, so the trainer works offline after the first visit.
+ *
+ * The file list is read from the output folder once the build is written,
+ * not from the bundle during generation: Vite drops CSS-only JavaScript
+ * chunks late, and a precache list naming a missing file would make the
+ * whole install fail. The cache name is a hash of the list, so each deploy
+ * replaces the previous cache.
  */
 function serviceWorker(): Plugin {
+  let outDir = 'dist';
   return {
     name: 'panelmix-service-worker',
     apply: 'build',
-    generateBundle(_options, bundle) {
-      const data = readdirSync('public/data').map((f) => `./data/${f}`);
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
       const files = [
         './',
-        ...Object.keys(bundle).filter((f) => !f.endsWith('.map')).map((f) => `./${f}`),
-        ...data,
-        './icon.svg',
-        './apple-touch-icon.png',
-        './icon-192.png',
-        './icon-512.png',
-        './manifest.webmanifest',
+        ...listFiles(outDir)
+          .filter((f) => !f.endsWith('.map') && f !== 'sw.js' && !f.startsWith('.'))
+          .sort()
+          .map((f) => `./${f}`),
       ];
       const version = createHash('sha256').update(files.join('\n')).digest('hex').slice(0, 12);
       const source = `const CACHE = 'panelmix-${version}';
@@ -50,7 +65,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(caches.match(request).then((hit) => hit || fetch(request)));
 });
 `;
-      this.emitFile({ type: 'asset', fileName: 'sw.js', source });
+      writeFileSync(path.join(outDir, 'sw.js'), source);
     },
   };
 }
