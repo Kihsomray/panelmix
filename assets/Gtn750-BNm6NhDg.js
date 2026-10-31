@@ -1,0 +1,2 @@
+import{t as e}from"./GtnUnit-BLUVw1zx.js";import{y as t}from"./index-DqFrD-VF.js";function n({panel:n}){return t(e,{model:`750`,panel:n})}export{n as Gtn750,n as default};
+//# sourceMappingURL=Gtn750-BNm6NhDg.js.map

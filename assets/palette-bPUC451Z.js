@@ -1,0 +1,2 @@
+var e={sky:`#1d5fc4`,skyTop:`#0d3f99`,ground:`#7a4a12`,groundBottom:`#5a3408`,white:`#ffffff`,black:`#000000`,magenta:`#ff40ff`,green:`#20e020`,cyan:`#00f0ff`,yellow:`#ffe000`,amber:`#ffb000`,red:`#ff2020`,gray:`#8a8a8a`,tape:`rgba(40, 40, 40, 0.62)`,tapeSolid:`#2b2b2b`,readout:`#000000`,arcWhite:`#ffffff`,arcGreen:`#18c418`,arcYellow:`#f2d400`,arcRed:`#ff1f1f`},t={vso:40,vs1:48,vfe:85,vno:129,vne:163,vr:55,vx:62,vy:74,vg:68},n=`'Barlow Semi Condensed', 'Arial Narrow', sans-serif`;export{n,t as r,e as t};
+//# sourceMappingURL=palette-bPUC451Z.js.map
