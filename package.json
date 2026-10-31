@@ -1,0 +1,27 @@
+{
+  "name": "panelmix",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mix-and-match avionics trainer: pick a PFD and a navigator and fly them together.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "navdata": "node scripts/build-navdata.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@fontsource/barlow-semi-condensed": "^5.3.0",
+    "preact": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "geomagnetism": "^0.2.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
