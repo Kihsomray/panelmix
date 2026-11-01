@@ -1,2 +1,0 @@
-import{F as e,N as t,R as n}from"./index-DqFrD-VF.js";function r(n,r){let i=e(n);i.current=n,t(()=>{let e=window.setInterval(()=>i.current(),r);return()=>window.clearInterval(e)},[r])}function i(e){let[t]=n(()=>({current:e()})),[,r]=n(0),i=()=>r(e=>e+1);return{get:()=>t.current,set:e=>{e!==t.current&&(t.current=e,i())},redraw:i}}var a=()=>performance.now()/1e3;export{r as n,i as r,a as t};
-//# sourceMappingURL=useUnit-BMMgcf8Y.js.map

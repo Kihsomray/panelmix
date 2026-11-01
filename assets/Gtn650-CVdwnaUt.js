@@ -1,0 +1,2 @@
+import{t as e}from"./GtnUnit-BrdUg0jJ.js";import{C as t}from"./index-CMsJ6Z-K.js";function n({panel:n}){return t(e,{model:`650`,panel:n})}export{n as Gtn650,n as default};
+//# sourceMappingURL=Gtn650-CVdwnaUt.js.map
