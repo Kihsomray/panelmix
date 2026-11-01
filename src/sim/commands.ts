@@ -1,7 +1,7 @@
-import { COM, NAV, snap } from '../core/frequency';
+import { COM, isLocalizer, NAV, snap } from '../core/frequency';
 import { norm360 } from '../core/geo';
 import type { MagneticModel } from '../core/magvar';
-import type { Waypoint } from '../core/navdb';
+import type { NavDatabase, Waypoint } from '../core/navdb';
 import type { Approach } from '../core/procedures';
 import { pitchForVerticalSpeed } from './flight';
 import * as fms from './fms';
@@ -74,6 +74,10 @@ export type SimCommand =
     }
   | { type: 'fms.activateApproach'; vectorsToFinal: boolean }
   | { type: 'fms.removeApproach' }
+  /** Activates one leg of the loaded approach as published (flight plan "activate leg"). */
+  | { type: 'fms.activateApproachLeg'; index: number }
+  /** Goes straight into the missed approach from the present position ("activate missed approach"). */
+  | { type: 'fms.activateMissed' }
   /** Resumes automatic sequencing after SUSP (missed approach, or out of a hold). */
   | { type: 'fms.unsuspend' }
   /** Pilot-entered hold at a waypoint. */
@@ -120,6 +124,8 @@ export type SimCommand =
 
 export interface CommandContext {
   readonly mag: MagneticModel;
+  /** For station declinations when loading procedures and for finding the glideslope APR arms. */
+  readonly db?: NavDatabase;
 }
 
 const IDENT_SECONDS = 18;
@@ -151,7 +157,7 @@ function engageDefaults(state: SimState): AutopilotState {
   const fresh = !state.ap.flightDirector;
   return {
     ...state.ap,
-    ...(fresh && { lateralArmed: null, altitudeArmed: false }),
+    ...(fresh && { lateralArmed: null, altitudeArmed: false, verticalArmed: null, approach: false }),
     engaged: true,
     lateral: state.ap.flightDirector ? state.ap.lateral : 'ROL',
     vertical: state.ap.flightDirector ? state.ap.vertical : 'PIT',
@@ -159,6 +165,26 @@ function engageDefaults(state: SimState): AutopilotState {
     pitchRefDeg: a.pitchDeg,
     altitudeRefFt: a.altitudeFt,
   };
+}
+
+const approachContext = (state: SimState, ctx: CommandContext): fms.ApproachContext => ({
+  mag: ctx.mag,
+  db: ctx.db,
+  time: state.time,
+  aircraft: state.aircraft,
+});
+
+/**
+ * Whether APR has a vertical path to arm: a coupled GPS glidepath (LPV,
+ * L/VNAV) on GPS, or an ILS glideslope on the NAV receiver the CDI shows.
+ */
+function hasVerticalPath(state: SimState, ctx: CommandContext): boolean {
+  const source = state.nav.cdiSource;
+  if (source === 'GPS') return fms.hasCoupledGlidepath(state.fms);
+  const khz = state.radios.nav[source === 'NAV1' ? 0 : 1].activeKhz;
+  if (!isLocalizer(khz)) return false;
+  // Without the database at hand, any localizer frequency may carry a glideslope.
+  return ctx.db ? ctx.db.tuneLocalizer(khz, state.aircraft)?.glideslope != null : true;
 }
 
 export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandContext): SimState {
@@ -251,7 +277,7 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
       return { ...state, nav: { ...state.nav, [cmd.pointer === 1 ? 'bearing1' : 'bearing2']: cmd.source } };
 
     case 'fms.directTo':
-      return setFms(fms.directTo(state.fms, cmd.waypoint, pos, cmd.planIndex ?? null));
+      return setFms(fms.directTo(state.fms, cmd.waypoint, pos, cmd.planIndex ?? null, { courseMag: cmd.courseMag, mag: ctx.mag }));
     case 'fms.cancelDirectTo':
       return setFms(fms.cancelDirectTo(state.fms, pos));
     case 'fms.activateLeg':
@@ -286,7 +312,7 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
       if (!cmd.on && state.ap.engaged) return state; // FD stays on while the autopilot flies
       const ap = cmd.on && !state.ap.flightDirector ? { ...engageDefaults(state), engaged: false } : state.ap;
       // Turning the director off cancels its armed modes.
-      const disarm = cmd.on ? {} : { lateralArmed: null, altitudeArmed: false };
+      const disarm = cmd.on ? {} : { lateralArmed: null, altitudeArmed: false, verticalArmed: null, approach: false };
       return { ...state, ap: { ...ap, ...disarm, flightDirector: cmd.on } };
     }
     case 'ap.lateral': {
@@ -295,14 +321,53 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
       const rollRefDeg = cmd.mode === 'ROL' ? cmd.rollRefDeg ?? held : ap.rollRefDeg;
       // Selecting NAV directly supersedes an armed capture.
       const lateralArmed = cmd.mode === 'NAV' ? null : ap.lateralArmed;
-      return { ...state, ap: { ...ap, lateral: cmd.mode, rollRefDeg, lateralArmed } };
+      // Leaving a captured approach (HDG or ROL instead of the localizer / GPS course) cancels it;
+      // while it is only armed, HDG is the intercept heading and the arm stays.
+      const leavesApproach = cmd.mode !== 'NAV' && ap.approach && ap.lateral === 'NAV';
+      const approach = leavesApproach ? { approach: false, verticalArmed: null } : {};
+      return { ...state, ap: { ...ap, lateral: cmd.mode, rollRefDeg, lateralArmed, ...approach } };
     }
     case 'ap.armNav':
       return { ...state, ap: { ...state.ap, lateralArmed: cmd.on ? 'NAV' : null } };
     case 'ap.gpss':
       return { ...state, ap: { ...state.ap, gpss: cmd.on } };
+    case 'ap.armGlidepath':
+      return { ...state, ap: { ...state.ap, verticalArmed: cmd.on ? 'GS' : null } };
+    case 'ap.approach': {
+      if (!cmd.on) {
+        if (!state.ap.approach) return state;
+        const ap = state.ap;
+        // APR off: back to wings level and pitch hold if the approach modes were flying.
+        return {
+          ...state,
+          ap: {
+            ...ap,
+            approach: false,
+            verticalArmed: null,
+            lateralArmed: null,
+            lateral: ap.lateral === 'NAV' ? 'ROL' : ap.lateral,
+            rollRefDeg: ap.lateral === 'NAV' ? 0 : ap.rollRefDeg,
+            vertical: ap.vertical === 'GS' ? 'PIT' : ap.vertical,
+            pitchRefDeg: ap.vertical === 'GS' ? a.pitchDeg : ap.pitchRefDeg,
+          },
+        };
+      }
+      const ap = state.ap.engaged || state.ap.flightDirector ? state.ap : { ...engageDefaults(state), engaged: false, flightDirector: true };
+      // APR arms the approach course (it captures like NAV) and the vertical path when there is one.
+      return {
+        ...state,
+        ap: {
+          ...ap,
+          approach: true,
+          lateralArmed: ap.lateral === 'NAV' ? null : 'NAV',
+          verticalArmed: ap.vertical === 'GS' ? null : hasVerticalPath(state, ctx) ? 'GS' : ap.verticalArmed,
+        },
+      };
+    }
     case 'ap.vertical': {
       const ap = state.ap.engaged || state.ap.flightDirector ? state.ap : { ...engageDefaults(state), engaged: false, flightDirector: true };
+      // The glideslope can't be selected, only armed: it captures when the path comes in.
+      if (cmd.mode === 'GS') return state.ap.vertical === 'GS' ? state : { ...state, ap: { ...ap, verticalArmed: 'GS' } };
       const next: AutopilotState = { ...ap, vertical: cmd.mode };
       if (cmd.mode === 'ALT') return { ...state, ap: { ...next, altitudeRefFt: Math.round(a.altitudeFt / 10) * 10 } };
       if (cmd.mode === 'PIT') return { ...state, ap: { ...next, pitchRefDeg: a.pitchDeg } };
@@ -325,6 +390,8 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
           vertical: 'VS',
           altitudeArmed: false,
           lateralArmed: null,
+          verticalArmed: null,
+          approach: false,
           gpss: false,
         },
         bugs: { ...state.bugs, verticalSpeedFpm: 0 },
@@ -393,16 +460,23 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
     case 'sim.qnh':
       return { ...state, env: { ...state.env, qnhInHg: cmd.inHg } };
 
-    // Procedure and approach-mode commands: implemented with the procedure-capable FMS.
+    // Instrument procedures.
     case 'fms.loadApproach':
+      return setFms(fms.loadApproach(state.fms, cmd.airport, cmd.approach, cmd.transition, cmd.activate, pos, approachContext(state, ctx)));
     case 'fms.activateApproach':
+      return setFms(fms.activateApproach(state.fms, cmd.vectorsToFinal, pos, approachContext(state, ctx)));
+    case 'fms.activateApproachLeg':
+      return setFms(fms.activateApproachLeg(state.fms, cmd.index, pos, approachContext(state, ctx)));
+    case 'fms.activateMissed':
+      return setFms(fms.activateMissedApproach(state.fms, pos, approachContext(state, ctx)));
     case 'fms.removeApproach':
+      return setFms(fms.removeApproach(state.fms, pos));
     case 'fms.unsuspend':
+      return setFms(fms.unsuspend(state.fms, pos, approachContext(state, ctx)));
     case 'fms.hold':
+      return setFms(fms.holdAt(state.fms, cmd.waypoint, cmd.inboundCourseMag, cmd.turn, cmd.legTimeMin, cmd.legNm, pos, approachContext(state, ctx)));
     case 'fms.exitHold':
-    case 'ap.armGlidepath':
-    case 'ap.approach':
-      return state;
+      return setFms(fms.exitHold(state.fms));
 
     case 'msg.post':
       return withMessage(state, cmd.text, cmd.level);

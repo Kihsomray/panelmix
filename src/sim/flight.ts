@@ -14,17 +14,27 @@ import type { AircraftState, EngineState, EnvironmentState, FlightEffects } from
  *
  * so climbing too steeply bleeds speed until the airplane stalls, and
  * reducing power in level flight slows it down, the way the real thing does.
+ *
+ * With a failed engine the fixed-pitch propeller windmills, turning the
+ * engine at an RPM set by the airspeed and adding drag, for the 172's 9 to
+ * 10 to 1 glide at 68 KIAS. Slowed toward the stall it stops (a stopped
+ * propeller drags less) and only a dive restarts it.
  */
 
 export const PERFORMANCE = {
   /** Stall, flaps up, KIAS. */
   vs: 48,
   vy: 74,
+  /** Best glide, KIAS. */
+  vbg: 68,
   vno: 129,
   vne: 163,
   /** Power-required curve, normalised to max sea-level power: a(V/100)^3 + b(100/V). */
   parasite: 0.447,
   induced: 0.17,
+  /** Extra power required against a dead engine's propeller, k(V/100)^3: windmilling, and stopped. */
+  windmillingDrag: 0.6,
+  stoppedPropDrag: 0.25,
   /** Climb rate per unit of excess power, fpm. */
   climbScale: 1240,
   maxBankDeg: 45,
@@ -32,6 +42,28 @@ export const PERFORMANCE = {
   /** Vertical-speed response time constant, s. */
   vsLag: 1.2,
 } as const;
+
+export const PROPELLER = {
+  /** Idle RPM of a running engine. */
+  idleRpm: 700,
+  /** Below this the propeller counts as stopped. */
+  stoppedRpm: 100,
+  /** A windmilling propeller stops against the engine's compression below this, KIAS. */
+  stopBelowKt: 52,
+  /** A stopped propeller starts windmilling again only in a dive past this, KIAS. */
+  restartAboveKt: 100,
+} as const;
+
+/** RPM of a windmilling fixed-pitch propeller: roughly proportional to the true airspeed. */
+export function windmillRpm(tasKt: number): number {
+  return Math.max(15 * tasKt - 150, 0);
+}
+
+/** Power lost to a dead engine's propeller, as a fraction of max sea-level power. */
+export function propellerDrag(easKt: number, sigma: number, stopped: boolean): number {
+  const k = stopped ? PERFORMANCE.stoppedPropDrag : PERFORMANCE.windmillingDrag;
+  return (k * (Math.max(easKt, 20) / 100) ** 3) / Math.sqrt(sigma);
+}
 
 const G_FTS2 = 32.174;
 const KT_TO_FTS = 1.68781;
@@ -81,25 +113,40 @@ export function pitchForVerticalSpeed(vsFpm: number, iasKt: number, tasKt: numbe
 const approach = (current: number, target: number, maxStep: number) =>
   current + Math.min(Math.max(target - current, -maxStep), maxStep);
 
-function stepEngine(e: EngineState, iasKt: number, sigma: number, dt: number): EngineState {
+/** Whether a dead engine's propeller still turns: it stops when slow and needs a dive to restart. */
+function propellerWindmills(rpm: number, iasKt: number): boolean {
+  return rpm < PROPELLER.stoppedRpm ? iasKt > PROPELLER.restartAboveKt : iasKt > PROPELLER.stopBelowKt;
+}
+
+function stepEngine(e: EngineState, iasKt: number, tasKt: number, sigma: number, effects: FlightEffects, dt: number): EngineState {
   const t = Math.min(Math.max(e.throttle, 0), 1);
-  const rpm = 700 + (1600 + 3 * iasKt) * Math.sqrt(t);
-  const fuelFlowGph = (1.2 + 9.8 * t ** 1.4) * Math.min(1, 0.4 + 0.6 * sigma);
+  // What the engine actually delivers (a rough engine gives less than the throttle asks).
+  const power = t * effects.powerFactor;
+  const running = effects.engineRunning;
+  // A running engine never turns slower than its propeller would windmill (idle in a descent).
+  const rpm = running
+    ? Math.max(PROPELLER.idleRpm + (1600 + 3 * iasKt) * Math.sqrt(power), windmillRpm(tasKt))
+    : propellerWindmills(e.rpm, iasKt)
+      ? windmillRpm(tasKt)
+      : 0;
+  const fuelFlowGph = running ? (1.2 + 9.8 * t ** 1.4) * Math.min(1, 0.4 + 0.6 * sigma) : 0;
   const burned = (fuelFlowGph * dt) / 3600;
   // Draw evenly from both tanks (fuel selector BOTH).
   const fuelGal: [number, number] = [Math.max(e.fuelGal[0] - burned / 2, 0), Math.max(e.fuelGal[1] - burned / 2, 0)];
   const lag = Math.min(dt / 30, 1);
+  const nextRpm = approach(e.rpm, rpm, (running ? 600 : 300) * dt);
   return {
     throttle: t,
-    rpm: approach(e.rpm, rpm, 600 * dt),
+    rpm: nextRpm,
     fuelFlowGph: approach(e.fuelFlowGph, fuelFlowGph, 4 * dt),
     fuelGal,
-    oilPressPsi: approach(e.oilPressPsi, 58 + 18 * t, 5 * dt),
-    oilTempF: e.oilTempF + (175 + 35 * t - e.oilTempF) * lag * 0.2,
-    egtF: e.egtF + (1080 + 380 * t - e.egtF) * Math.min(dt / 4, 1),
-    chtF: e.chtF + (290 + 110 * t - e.chtF) * lag,
-    volts: 28 + 0.1 * t,
-    amps: approach(e.amps, 3 + 2 * t, dt),
+    // A windmilling engine still turns its oil pump, weakly.
+    oilPressPsi: approach(e.oilPressPsi, running ? 58 + 18 * t : 0.03 * nextRpm, 5 * dt),
+    oilTempF: e.oilTempF + ((running ? 175 + 35 * power : 120) - e.oilTempF) * lag * 0.2,
+    egtF: e.egtF + ((running ? 1080 + 380 * power : 300) - e.egtF) * Math.min(dt / (running ? 4 : 20), 1),
+    chtF: e.chtF + ((running ? 290 + 110 * power : 150) - e.chtF) * (running ? lag : Math.min(dt / 120, 1)),
+    volts: effects.busVolts,
+    amps: effects.batteryAmps,
   };
 }
 
@@ -108,16 +155,19 @@ export interface FlightStepResult {
   readonly stalled: boolean;
 }
 
-/** No failures, no turbulence, the surface wind, sea-level ground. */
+/** No failures, no turbulence, the surface wind, sea-level ground, a charging battery. */
 export function neutralEffects(env: EnvironmentState): FlightEffects {
   return {
     powerFactor: 1,
+    engineRunning: true,
     windFromTrue: env.windFromTrue,
     windKt: env.windKt,
     gustBankDeg: 0,
     gustVerticalFpm: 0,
     gustAirspeedKt: 0,
     groundElevationFt: 0,
+    busVolts: 28.1,
+    batteryAmps: 1,
   };
 }
 
@@ -125,6 +175,9 @@ export function neutralEffects(env: EnvironmentState): FlightEffects {
  * Advances the airplane by `dt` seconds toward the commanded bank and vertical
  * speed. `effects` carries the engine's health, the wind at altitude,
  * turbulence and the ground elevation the airplane cannot sink below.
+ * Gusts arrive smoothly: bank and vertical gusts go through the roll-rate
+ * limit and the vertical-speed lag, and the airspeed gust is applied as its
+ * change over the step, so it rides on the speed without accumulating.
  */
 export function stepFlight(
   a: AircraftState,
@@ -150,11 +203,16 @@ export function stepFlight(
   if (stalled) vsCmd = Math.min(vsCmd, -900 - (P.vs - a.iasKt) * 120);
   const vs = a.verticalSpeedFpm + (vsCmd - a.verticalSpeedFpm) * Math.min(dt / P.vsLag, 1);
 
-  // Energy: excess power not spent climbing changes the speed.
-  const ps = excessPowerFpm(a.iasKt, throttle, sigma);
+  // Energy: excess power not spent climbing changes the speed. A dead engine's propeller adds drag.
+  const propDrag = effects.engineRunning
+    ? 0
+    : PERFORMANCE.climbScale * propellerDrag(a.iasKt, sigma, a.engine.rpm < PROPELLER.stoppedRpm);
+  const ps = excessPowerFpm(a.iasKt, throttle, sigma) - propDrag;
+  // Rising with an updraft costs no airspeed: only the climb through the air is paid for.
+  const climbFpm = vs - effects.gustVerticalFpm;
   const tasFts = Math.max(a.tasKt, 25) * KT_TO_FTS;
-  const dTasKt = ((((ps - vs) / 60) * G_FTS2) / tasFts / KT_TO_FTS) * dt;
-  const tasKt = Math.min(Math.max(a.tasKt + dTasKt + effects.gustAirspeedKt * Math.min(dt, 1), 30), 200);
+  const dTasKt = ((((ps - climbFpm) / 60) * G_FTS2) / tasFts / KT_TO_FTS) * dt;
+  const tasKt = Math.min(Math.max(a.tasKt + dTasKt + effects.gustAirspeedKt, 30), 200);
   const iasKt = tasKt * Math.sqrt(sigma);
 
   // Turn and wind.
@@ -191,7 +249,7 @@ export function stepFlight(
       turnRateDps,
       // A little adverse yaw while rolling, as with an autopilot that has no rudder.
       slip: Math.min(Math.max(-rollRate * 0.025, -0.35), 0.35),
-      engine: stepEngine(a.engine, iasKt, sigma, dt),
+      engine: stepEngine(a.engine, iasKt, trueAirspeed(iasKt, sigma), sigma, effects, dt),
     },
   };
 }

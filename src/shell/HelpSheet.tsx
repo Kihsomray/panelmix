@@ -67,8 +67,16 @@ export function HelpSheet({ spec, onClose }: { spec: DeviceSpec | null; onClose:
             <strong>Focus</strong> (the arrows on each unit's title bar) enlarges one unit. On a phone, turn it sideways.
           </li>
           <li>
-            <strong>Fly</strong> (bottom right) has the yoke, throttle, position and weather. The units all talk to each other: a flight
-            plan built on the navigator drives the PFD's course needle, and the CDI key picks GPS or VOR.
+            <strong>Fly</strong> (bottom right) has the yoke, throttle and position. The units all talk to each other: a flight plan built on
+            the navigator drives the PFD's course needle, and the CDI key picks GPS or VOR.
+          </li>
+          <li>
+            <strong>Instructor</strong> fails systems (now, later or as a surprise), sets the wind, turbulence and altimeter setting, and starts
+            scenarios at an approach, on final or at a holding fix.
+          </li>
+          <li>
+            <strong>Lessons</strong> are guided exercises checked live as you fly, with hints for the units in your panel, from radios to
+            approaches, holds and partial panel.
           </li>
         </ul>
         {!spec && (

@@ -9,6 +9,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "navdata": "node scripts/build-navdata.mjs",
+    "cifp": "node scripts/build-cifp.mjs",
+    "terrain": "node scripts/build-terrain.mjs",
+    "airspace": "node scripts/build-airspace.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm test && npm run build"

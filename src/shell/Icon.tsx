@@ -12,6 +12,10 @@ const PATHS = {
   reset: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5',
   level: 'M2 12h20M12 7v10',
   chevron: 'm6 9 6 6 6-6',
+  back: 'm15 18-6-6 6-6',
+  check: 'm5 12.5 4.5 4.5L19 7',
+  book: 'M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5v-15ZM4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5',
+  alert: 'M12 3 2 20h20L12 3ZM12 10v4.5M12 17.5v.01',
 } as const;
 
 export type ShellIconName = keyof typeof PATHS;

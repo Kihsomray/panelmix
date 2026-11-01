@@ -1,4 +1,5 @@
 import { initialSimState } from './defaults';
+import { restoreFms } from './fms/restore';
 import { FMS_NULLABLE, SYSTEMS_NULLABLE, type SimState } from './types';
 
 /*
@@ -16,7 +17,9 @@ const isPlain = (v: unknown): v is Plain => typeof v === 'object' && v !== null 
 /** State fields that may legitimately be null. */
 const NULLABLE = new Set<string>(['minimumsFt', 'identUntil', 'lateralArmed', 'verticalArmed', ...FMS_NULLABLE, ...SYSTEMS_NULLABLE]);
 /** Arrays whose length varies; every other array is a fixed tuple (two radios, two tanks). */
-const OPEN_LISTS = new Set(['plan', 'messages']);
+const OPEN_LISTS = new Set(['plan', 'messages', 'windsAloft']);
+/** Nullable fields that hold one of a few strings (armed autopilot modes). */
+const NULLABLE_STRINGS: Record<string, readonly string[]> = { lateralArmed: ['NAV'], verticalArmed: ['GS'] };
 
 /**
  * Deep merge where `saved` may only replace values of the same JSON type as
@@ -38,7 +41,10 @@ export function mergeOver<T>(defaults: T, saved: unknown, key = ''): T {
     // Fixed tuples keep their shape: merge element by element, or fall back if the length differs.
     return saved.length === defaults.length ? (defaults.map((d, i) => mergeOver(d, saved[i])) as T) : defaults;
   }
-  if (defaults === null) return (typeof saved === 'number' && Number.isFinite(saved) ? saved : null) as T;
+  if (defaults === null) {
+    if (typeof saved === 'string') return (NULLABLE_STRINGS[key]?.includes(saved) ? saved : null) as T;
+    return (typeof saved === 'number' && Number.isFinite(saved) ? saved : null) as T;
+  }
   return typeof saved === typeof defaults && (typeof saved !== 'number' || Number.isFinite(saved)) ? (saved as T) : defaults;
 }
 
@@ -55,10 +61,10 @@ export function loadSimState(storage: Pick<Storage, 'getItem'> | undefined = saf
     const saved: unknown = JSON.parse(raw);
     if (!isPlain(saved) || saved.v !== 1) return defaults;
     const state = mergeOver(defaults, saved.state);
-    // A plan restored without its active leg is still valid; a leg without the plan is cleared.
-    const leg = state.fms.activeLeg;
-    const legOk = !leg || leg.planIndex === null || state.fms.plan[leg.planIndex]?.ident === leg.to.ident;
-    return sessionOnly({ ...state, fms: legOk ? state.fms : { ...state.fms, activeLeg: null } });
+    // The FMS (approach, hold, procedure legs) is checked part by part: a plan restored without
+    // its active leg is still valid; a leg without its plan or approach is cleared.
+    const fms = restoreFms(state.fms, isPlain(saved.state) ? saved.state.fms : undefined);
+    return sessionOnly({ ...state, fms });
   } catch {
     return defaults;
   }

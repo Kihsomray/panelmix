@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { MagneticModel, type MagvarGrid } from './core/magvar';
 import { createAirspaceSource, type RawAirspace } from './core/airspaceSource';
 import { NavDatabase, type RawAirway, type RawFix, type RawLocalizer, type RawNavdata } from './core/navdb';
@@ -8,8 +8,11 @@ import type { DeviceSpec, Slot } from './devices/types';
 import { SimContext } from './sim/hooks';
 import { loadSimState, saveSimState } from './sim/persist';
 import { Simulator } from './sim/simulator';
+import { ShellContext, useStore, type ShellStores } from './shell/context';
 import { HelpSheet } from './shell/HelpSheet';
 import { Icon } from './shell/Icon';
+import { InstructorStore } from './shell/instructor/store';
+import { LessonStore } from './shell/lessons/store';
 import { PanelPicker } from './shell/PanelPicker';
 import { PanelStage } from './shell/PanelStage';
 import { encodePanel, loadPanel, NONE, normalize, panelInfo, PRESETS, savePanel, type PanelConfig } from './shell/panels';
@@ -113,6 +116,20 @@ function Cockpit({ sim }: { sim: Simulator }) {
   const [help, setHelp] = useState<{ spec: DeviceSpec | null } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const panel = useMemo(() => panelInfo(config), [config]);
+  const stores = useMemo<ShellStores>(() => ({ instructor: new InstructorStore(), lessons: new LessonStore() }), [sim]);
+  const panelRef = useRef(panel);
+  panelRef.current = panel;
+  const inLesson = useStore(stores.lessons, () => stores.lessons.run !== null);
+
+  // The instructor's scheduled failures and the lesson in progress follow every simulator frame.
+  useEffect(
+    () =>
+      sim.subscribe(() => {
+        stores.instructor.tick(sim.getState().time, sim.dispatch);
+        stores.lessons.tick({ state: sim.getState(), derived: sim.getDerived(), panel: panelRef.current });
+      }),
+    [sim, stores],
+  );
 
   useEffect(() => {
     sim.start();
@@ -166,44 +183,49 @@ function Cockpit({ sim }: { sim: Simulator }) {
   };
 
   return (
-    <div class="app">
-      <header class="topbar">
-        <Logo />
-        <button type="button" class="pill-btn panel-toggle" onClick={() => setPickerOpen(!pickerOpen)} aria-expanded={pickerOpen}>
-          <Icon name="panel" />
-          Build panel
-        </button>
-        <div class={`picker-wrap${pickerOpen ? ' is-open' : ''}`}>
-          <PanelPicker config={config} onChange={change} onPreset={preset} />
-        </div>
-        <div class="topbar-actions">
-          <button type="button" class="icon-btn" onClick={share} aria-label="Share this panel" title="Share this panel">
-            <Icon name="share" />
+    <ShellContext.Provider value={stores}>
+      <div class={`app${inLesson ? ' has-lesson' : ''}`}>
+        <header class="topbar">
+          <Logo />
+          <button type="button" class="pill-btn panel-toggle" onClick={() => setPickerOpen(!pickerOpen)} aria-expanded={pickerOpen}>
+            <Icon name="panel" />
+            Build panel
           </button>
-          <button type="button" class="icon-btn" onClick={() => setHelp({ spec: null })} aria-label="How to use" title="How to use">
-            <Icon name="help" />
-          </button>
-        </div>
-      </header>
+          <div class={`picker-wrap${pickerOpen ? ' is-open' : ''}`}>
+            <PanelPicker config={config} onChange={change} onPreset={preset} />
+          </div>
+          <div class="topbar-actions">
+            <button type="button" class="icon-btn" onClick={share} aria-label="Share this panel" title="Share this panel">
+              <Icon name="share" />
+            </button>
+            <button type="button" class="icon-btn" onClick={() => setHelp({ spec: null })} aria-label="How to use" title="How to use">
+              <Icon name="help" />
+            </button>
+          </div>
+        </header>
 
-      {notes.length > 0 && (
-        <div class="toast" role="status">
-          {notes.map((n) => (
-            <p key={n}>{n}</p>
-          ))}
-        </div>
-      )}
+        {notes.length > 0 && (
+          <div class="toast" role="status">
+            {notes.map((n) => (
+              <p key={n}>{n}</p>
+            ))}
+          </div>
+        )}
 
-      <main class="stage-wrap">
-        <PanelStage config={config} panel={panel} onHelp={(spec) => setHelp({ spec })} />
-      </main>
+        <main class="stage-wrap">
+          <PanelStage config={config} panel={panel} onHelp={(spec) => setHelp({ spec })} bottomInset={inLesson ? LESSON_STRIP_H : 0} />
+        </main>
 
-      <SimBar simAutopilot={config.ap === NONE} />
-      <KnobDock />
-      {help && <HelpSheet spec={help.spec} onClose={() => setHelp(null)} />}
-    </div>
+        <SimBar simAutopilot={config.ap === NONE} panel={panel} />
+        <KnobDock />
+        {help && <HelpSheet spec={help.spec} onClose={() => setHelp(null)} />}
+      </div>
+    </ShellContext.Provider>
   );
 }
+
+/** Height of the lesson strip above the sim bar (matches `.lsn-strip-wrap` in app.css). */
+const LESSON_STRIP_H = 46;
 
 function Logo() {
   return (

@@ -1,12 +1,20 @@
+import type { AirspaceSource } from '../../core/airspace';
 import { projectNm, toRad, type LatLon } from '../../core/geo';
 import type { Airport, Navaid, NavDatabase, Waypoint } from '../../core/navdb';
 import type { ActiveLeg } from '../../sim/types';
+import { paintApproach, type ApproachLayerOptions } from './approachLayer';
 import { getBasemap } from './basemap';
+import { AIRSPACE_COLORS, LabelSpace, paintAirspace, paintAirways, paintFixes, type AirspaceColors, type OverlayContext } from './overlays';
+import { paintTerrain, visibleBox, type TerrainLayerOptions } from './terrainLayer';
+
+export { terrainRevision } from './terrainLayer';
 
 /*
- * Canvas moving map shared by every navigator and MFD: basemap, airports,
- * navaids, the flight plan (active leg magenta) and the ownship symbol.
- * Devices pick a style and a range; this file knows nothing about any unit.
+ * Canvas moving map shared by every navigator and MFD: terrain, basemap,
+ * airspace, airways, intersections, airports, navaids, the flight plan and
+ * a loaded approach (active leg magenta) and the ownship symbol. Devices
+ * pick a style, a range and the layers they show; this file knows nothing
+ * about any unit. Every optional layer is off unless its option is set.
  */
 
 export interface MapStyle {
@@ -28,6 +36,12 @@ export interface MapStyle {
   readonly font: string;
   readonly fontSize: number;
   readonly highlight: string;
+  /** Airspace boundary colours (default: Garmin blue B, magenta C, dashed blue D). */
+  readonly airspace?: AirspaceColors;
+  /** Intersection triangles (default cyan). */
+  readonly fix?: string;
+  /** Airway lines (default grey). */
+  readonly airway?: string;
 }
 
 export const MAP_STYLES = {
@@ -101,6 +115,28 @@ export interface MapOptions {
   readonly highlight?: Waypoint | null;
   /** Range ring around the ownship at this many nm, labelled. */
   readonly ringNm?: number | null;
+
+  // Optional layers, all off by default.
+  /**
+   * Terrain under everything: `topo` elevation colours, or `relative` TAWS
+   * colours against `altitudeFt` (red within 100 ft below or above, yellow
+   * within 1,000 ft below). Not drawn beyond about 250 nm range. Add
+   * `terrainRevision(provider)` (and the altitude, for `relative`) to a
+   * repaint key so the map redraws as tiles arrive.
+   */
+  readonly terrain?: TerrainLayerOptions | null;
+  /** Class B, C and D boundaries with chart-style altitude labels at short ranges. */
+  readonly airspace?: AirspaceSource | null;
+  /** Intersections and RNAV waypoints (`db.fixes`) up to 20 nm range (terminal waypoints up to 10 nm). */
+  readonly fixes?: boolean;
+  /** Victor and T airways up to 80 nm range, named up to 30 nm. */
+  readonly airways?: boolean;
+  /**
+   * The loaded approach (`fms.approach.legs`) and its active leg
+   * (`derived.approach.activeLegIndex`). When `route.activeLeg` is one of
+   * these legs, the approach layer draws it.
+   */
+  readonly approach?: ApproachLayerOptions | null;
 }
 
 export interface MapProjection {
@@ -297,7 +333,7 @@ function drawOwnship(ctx: CanvasRenderingContext2D, x: number, y: number, angleD
 
 /** Paints the whole map. Returns the projection so devices can overlay their own symbols. */
 export function paintMap(ctx: CanvasRenderingContext2D, o: MapOptions): MapProjection {
-  const style = o.style ?? MAP_STYLES.garmin;
+  const style: MapStyle = o.style ?? MAP_STYLES.garmin;
   const proj = makeProjection(o);
   const { width: w, height: h } = o;
   const declutter = o.declutter ?? 0;
@@ -315,6 +351,9 @@ export function paintMap(ctx: CanvasRenderingContext2D, o: MapOptions): MapProje
     west: proj.origin.lon - lonSpan,
     east: proj.origin.lon + lonSpan,
   };
+  const frame = { width: w, height: h, origin: proj.origin, ox: proj.ox, oy: proj.oy, scale: proj.scale, upTrue: o.upTrue };
+
+  if (o.terrain) paintTerrain(ctx, o.terrain, frame, style.lakeFill);
 
   const base = getBasemap();
   if (base) {
@@ -346,36 +385,76 @@ export function paintMap(ctx: CanvasRenderingContext2D, o: MapOptions): MapProje
     strokeLines(ctx, base.borders, proj, box);
   }
 
+  const range = o.rangeNm;
+  const approach = o.approach && o.approach.legs.length > 0 ? o.approach : null;
+  // Flight plan and approach waypoints get their own symbols and labels below.
+  const planIdents = new Set(o.route?.plan.map((p) => p.ident));
+  for (const l of approach?.legs ?? []) if (l.to) planIdents.add(l.to.ident);
+
   ctx.font = `600 ${style.fontSize}px ${style.font}`;
   ctx.textBaseline = 'middle';
-  const range = o.rangeNm;
   const { airports, navaids } = o.db.inBox(box.south, box.west, box.north, box.east);
   const onScreen = (s: { x: number; y: number }) => s.x > -20 && s.x < w + 20 && s.y > -20 && s.y < h + 20;
 
-  // Navaids under airports.
+  // Pick the navaids and airports first: the overlays' labels keep clear of their symbols and names.
+  const navaidMarks: { n: Navaid; x: number; y: number; named: boolean }[] = [];
   for (const n of navaids) {
     if (n.kind === 'ndb' && (range > 40 || declutter >= 2)) continue;
     if (n.kind === 'vor' && range > 300) continue;
     const s = proj.toScreen(n);
-    if (!onScreen(s)) continue;
-    drawNavaid(ctx, n, s.x, s.y, style);
-    if (declutter < 3 && range <= 120 && !o.route?.plan.some((w) => w.ident === n.ident)) {
-      label(ctx, n.ident, s.x + 10, s.y - 9, style, n.kind === 'vor' ? style.vor : style.ndb);
-    }
+    if (onScreen(s)) navaidMarks.push({ n, ...s, named: declutter < 3 && range <= 120 && !planIdents.has(n.ident) });
   }
-
   const minSize = range > 150 ? 2 : range > 60 ? 1 : 0;
-  // Flight plan waypoints get their own labels below.
-  const routeIdents = new Set(o.route?.plan.map((w) => w.ident));
+  const routeIdents = new Set(o.route?.plan.map((p) => p.ident));
   if (o.route?.activeLeg) routeIdents.add(o.route.activeLeg.to.ident);
+  const airportMarks: { a: Airport; x: number; y: number; named: boolean }[] = [];
   for (const a of airports) {
     if (a.size < minSize && !(a.towered && range <= 100)) continue;
     if (declutter >= 1 && !a.hardSurface && a.size === 0) continue;
     const s = proj.toScreen(a);
-    if (!onScreen(s)) continue;
-    drawAirport(ctx, a, s.x, s.y, style, proj);
-    const showLabel = declutter < 3 && !routeIdents.has(a.ident) && (range <= 40 || a.size > 0 || (a.towered && range <= 100));
-    if (showLabel) label(ctx, a.ident, s.x + 9, s.y + 11, style);
+    const named = declutter < 3 && !routeIdents.has(a.ident) && (range <= 40 || a.size > 0 || (a.towered && range <= 100));
+    if (onScreen(s)) airportMarks.push({ a, ...s, named });
+  }
+
+  // What is really on screen (the `box` above is generous for rotation).
+  const view = visibleBox(frame);
+  if (o.airspace || o.airways || o.fixes) {
+    const labels = new LabelSpace();
+    for (const m of [...navaidMarks, ...airportMarks]) {
+      labels.reserve(m.x, m.y, 22, 22);
+      if (!m.named) continue;
+      const text = 'n' in m ? m.n.ident : m.a.ident;
+      const tw = ctx.measureText(text).width;
+      const [lx, ly] = 'n' in m ? [m.x + 10, m.y - 9] : [m.x + 9, m.y + 11];
+      labels.reserve(lx + tw / 2, ly, tw + 4, style.fontSize + 2);
+    }
+    const overlay: OverlayContext = {
+      toScreen: proj.toScreen,
+      box: view,
+      width: w,
+      height: h,
+      rangeNm: range,
+      declutter,
+      font: style.font,
+      fontSize: style.fontSize,
+      halo: style.labelHalo,
+      labels,
+    };
+    if (o.airspace) paintAirspace(ctx, o.airspace, overlay, style.airspace ?? AIRSPACE_COLORS);
+    if (o.airways) paintAirways(ctx, o.db.airways, overlay, style.airway);
+    if (o.fixes) paintFixes(ctx, o.db.fixes, overlay, planIdents, style.fix);
+    ctx.font = `600 ${style.fontSize}px ${style.font}`;
+    ctx.textBaseline = 'middle';
+  }
+
+  // Navaids under airports.
+  for (const { n, x, y, named } of navaidMarks) {
+    drawNavaid(ctx, n, x, y, style);
+    if (named) label(ctx, n.ident, x + 10, y - 9, style, n.kind === 'vor' ? style.vor : style.ndb);
+  }
+  for (const { a, x, y, named } of airportMarks) {
+    drawAirport(ctx, a, x, y, style, proj);
+    if (named) label(ctx, a.ident, x + 9, y + 11, style);
   }
 
   // Flight plan: white legs, magenta active leg, labelled waypoints.
@@ -396,7 +475,22 @@ export function paintMap(ctx: CanvasRenderingContext2D, o: MapOptions): MapProje
     }
   }
   const leg = route?.activeLeg;
-  if (leg) {
+  if (approach) {
+    paintApproach(ctx, approach, {
+      toScreen: proj.toScreen,
+      box: view,
+      width: w,
+      height: h,
+      white: style.route,
+      magenta: style.routeActive,
+      label: (text, x, y, color) => label(ctx, text, x, y, style, color),
+      activeLeg: leg ?? null,
+      enrouteEnd: route?.plan[route.plan.length - 1] ?? null,
+    });
+  }
+  // An approach leg is drawn by the approach layer (as the arc, hold or vector it really is).
+  const approachLegActive = approach !== null && leg?.approachIndex !== null && leg?.approachIndex !== undefined;
+  if (leg && !approachLegActive) {
     const a = proj.toScreen(leg.from);
     const b = proj.toScreen(leg.to);
     ctx.lineWidth = 4;

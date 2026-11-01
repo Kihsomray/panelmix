@@ -150,6 +150,7 @@ export function shortApproachName(a: Approach): string {
     const letter = a.id.match(/-?([A-Z])$/)?.[1] ?? '';
     return `${type}${letter ? `-${letter}` : ''}`;
   }
-  const suffix = a.id.match(/-([XYZ])$/)?.[1];
+  // Charted letter suffixes (W, X, Y, Z...) tell apart approaches to the same runway.
+  const suffix = a.id.match(/-([A-Z])$/)?.[1];
   return `${type}${suffix ? ` ${suffix}` : ''} ${a.runway}`;
 }

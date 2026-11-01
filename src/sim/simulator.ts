@@ -11,7 +11,7 @@ import { stepFlight } from './flight';
 import { approachDerived, fmsSteering, gpsSolution, sequence, verticalDerived, type GpsSolution } from './fms';
 import type { ApproachDerived, FmsSteering, VerticalDerived } from './fms/types';
 import { bearingSolution, cdiSolution, vorSolution, type BearingSolution, type CdiSolution, type VorSolution } from './radionav';
-import { computeSystems, stepSystems, type SystemsContext } from './systems';
+import { computeSystems, stepSystems, type SystemsContext, type SystemsField } from './systems';
 import type { SystemsDerived } from './systems/types';
 import type { SimState } from './types';
 
@@ -76,8 +76,11 @@ export class Simulator {
   private frame = 0;
   private lastFrameAt = 0;
   private floorFt = 0;
+  /** The nearest airport, refreshed with the floor: TAWS terminal clearances and the landing inhibit. */
+  private nearestField: SystemsField | null = null;
   private floorCheckedAt = -Infinity;
   private stalled = false;
+  private lastStallMessageAt = -Infinity;
 
   readonly terrain: TerrainProvider;
   readonly airspace: AirspaceSource;
@@ -111,7 +114,7 @@ export class Simulator {
   };
 
   dispatch = (cmd: SimCommand): void => {
-    const next = applyCommand(this.state, cmd, { mag: this.mag });
+    const next = applyCommand(this.state, cmd, { mag: this.mag, db: this.db });
     if (next !== this.state) {
       this.state = next;
       this.emit();
@@ -179,11 +182,14 @@ export class Simulator {
       cdi: d.cdi,
       gps: d.gps,
       vorDistanceNm: d.cdi.source === 'GPS' ? null : distanceToStation(d, s),
+      steering: d.steering,
+      vertical: d.vertical,
     });
 
     if (time - this.floorCheckedAt > FLOOR_REFRESH_S || time < this.floorCheckedAt) {
       const near = this.db.nearestAirports(s.aircraft, 1, {}, 8)[0];
       this.floorFt = near ? near.item.elevationFt : 0;
+      this.nearestField = near ? near.item : null;
       this.floorCheckedAt = time;
     }
 
@@ -192,11 +198,23 @@ export class Simulator {
     let next: SimState = { ...s, time, aircraft, attitudeHold, ap: g.ap, systems: sys.systems };
     for (const m of sys.messages) next = applyCommand(next, { type: 'msg.post', text: m.text, level: m.level }, { mag: this.mag });
 
-    if (stalled && !this.stalled) next = applyCommand(next, { type: 'msg.post', text: 'STALL', level: 'caution' }, { mag: this.mag });
+    // One STALL message per stall, not one per buffet: repeat only after 20 s of flying.
+    if (stalled && !this.stalled && time - this.lastStallMessageAt > 20) {
+      next = applyCommand(next, { type: 'msg.post', text: 'STALL', level: 'caution' }, { mag: this.mag });
+      this.lastStallMessageAt = time;
+    }
     this.stalled = stalled;
 
-    const fms = sequence(next.fms, aircraft, aircraft.groundSpeedKt);
-    if (fms !== next.fms) next = { ...next, fms };
+    // Without a GPS position the FMS can't tell where the airplane is along the route.
+    if (d.systems.gpsValid) {
+      const fms = sequence(next.fms, aircraft, aircraft.groundSpeedKt, {
+        trackTrue: aircraft.trackTrue,
+        altitudeFt: aircraft.altitudeFt,
+        tasKt: aircraft.tasKt,
+        time,
+      });
+      if (fms !== next.fms) next = { ...next, fms };
+    }
 
     if (next.xpdr.identUntil !== null && time >= next.xpdr.identUntil) {
       next = { ...next, xpdr: { ...next.xpdr, identUntil: null } };
@@ -209,12 +227,24 @@ export class Simulator {
     const magVar = this.mag.variation(a.lat, a.lon);
     const pAlt = pressureAltitude(a.altitudeFt, s.env.qnhInHg);
     const sigma = densityRatio(pAlt, s.env.isaDeviationC);
-    const gps = gpsSolution(s.fms, a, a.trackTrue, a.groundSpeedKt, this.mag);
+    const indicatedAltitudeFt = indicatedAltitude(a.altitudeFt, s.env.qnhInHg, s.bugs.baroStd ? STD_INHG : s.bugs.baroInHg);
+    const oatC = outsideAirTempC(pAlt, s.env.isaDeviationC);
+    const systems = computeSystems(s, {
+      ...this.systemsContextBase(),
+      indicatedAltitudeFt,
+      headingMag: norm360(a.headingTrue - magVar),
+      oatC,
+    });
+    // Navigation: the GPS solution and steering go invalid with the GPS (failure or no power).
+    const gpsValid = systems.gpsValid;
+    const gps = gpsSolution(s.fms, a, a.trackTrue, a.groundSpeedKt, this.mag, gpsValid);
     const vor: [VorSolution, VorSolution] = [
       vorSolution(this.db, s.radios.nav[0].activeKhz, a, a.altitudeFt, s.nav.obsMag[0]),
       vorSolution(this.db, s.radios.nav[1].activeKhz, a, a.altitudeFt, s.nav.obsMag[1]),
     ];
     const cdi = cdiSolution(s, gps, vor);
+    const steering = fmsSteering(s, a, this.mag, gpsValid);
+    const vertical = verticalDerived(s, a, this.mag, vor, gpsValid);
     const g = guidance({
       state: s,
       headingMag: norm360(a.headingTrue - magVar),
@@ -223,14 +253,8 @@ export class Simulator {
       cdi,
       gps,
       vorDistanceNm: null,
-    });
-    const indicatedAltitudeFt = indicatedAltitude(a.altitudeFt, s.env.qnhInHg, s.bugs.baroStd ? STD_INHG : s.bugs.baroInHg);
-    const oatC = outsideAirTempC(pAlt, s.env.isaDeviationC);
-    const systems = computeSystems(s, {
-      ...this.systemsContextBase(),
-      indicatedAltitudeFt,
-      headingMag: norm360(a.headingTrue - magVar),
-      oatC,
+      steering,
+      vertical,
     });
     const windRelativeDeg = norm360(systems.windFromTrue - a.headingTrue);
     const rel = (windRelativeDeg * Math.PI) / 180;
@@ -255,13 +279,13 @@ export class Simulator {
       windRelativeDeg,
       systems,
       approach: approachDerived(s, a, this.mag),
-      vertical: verticalDerived(s, a, this.mag, vor),
-      steering: fmsSteering(s, a, this.mag),
+      vertical,
+      steering,
     };
   }
 
   private systemsContextBase() {
-    return { mag: this.mag, terrain: this.terrain, airspace: this.airspace, fieldElevationFt: this.floorFt };
+    return { mag: this.mag, terrain: this.terrain, airspace: this.airspace, fieldElevationFt: this.floorFt, field: this.nearestField };
   }
 
   private systemsContext(_s: SimState, d: Derived): SystemsContext {
@@ -270,11 +294,15 @@ export class Simulator {
       indicatedAltitudeFt: d.indicatedAltitudeFt,
       headingMag: d.headingMag,
       oatC: d.oatC,
+      // Already computed for this state: stepSystems reuses it instead of recomputing.
+      derived: d.systems,
     };
   }
 }
 
+/** Distance to the VOR or localizer antenna the CDI shows. */
 function distanceToStation(d: Derived, s: SimState): number | null {
   const v = d.vor[s.nav.cdiSource === 'NAV1' ? 0 : 1];
+  if (v.distanceNm !== undefined) return v.distanceNm;
   return v.station ? distanceNm(s.aircraft, v.station) : null;
 }

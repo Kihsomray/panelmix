@@ -41,3 +41,34 @@ export function densityAltitude(pressureAltitudeFt: number, isaDeviationC: numbe
 export function trueAirspeed(iasKt: number, sigma: number): number {
   return iasKt / Math.sqrt(sigma);
 }
+
+/*
+ * Pitot-static pressures, for instruments whose tubes are blocked: a blocked
+ * port traps a pressure, and the instrument keeps converting whatever
+ * pressures it sees into an altitude or an airspeed.
+ */
+
+const PRESSURE_EXPONENT = 5.2559;
+const SPEED_OF_SOUND_SL_KT = 661.47;
+
+/** Static pressure at a pressure altitude, inHg. */
+export function staticPressureInHg(pressureAltitudeFt: number): number {
+  return STD_INHG * Math.max(1 - LAPSE * pressureAltitudeFt, 0) ** PRESSURE_EXPONENT;
+}
+
+/** The pressure altitude an altimeter shows for a static pressure (inverse of `staticPressureInHg`). */
+export function pressureAltitudeForInHg(staticInHg: number): number {
+  return (1 - (Math.max(staticInHg, 0) / STD_INHG) ** (1 / PRESSURE_EXPONENT)) / LAPSE;
+}
+
+/** Impact pressure (pitot minus static) at a calibrated airspeed, inHg (subsonic, compressible). */
+export function impactPressureInHg(casKt: number): number {
+  const m = Math.max(casKt, 0) / SPEED_OF_SOUND_SL_KT;
+  return STD_INHG * ((1 + 0.2 * m * m) ** 3.5 - 1);
+}
+
+/** The airspeed an indicator shows for an impact pressure, kt; zero when there is none. */
+export function airspeedForImpactPressure(impactInHg: number): number {
+  if (impactInHg <= 0) return 0;
+  return SPEED_OF_SOUND_SL_KT * Math.sqrt(5 * ((impactInHg / STD_INHG + 1) ** (2 / 7) - 1));
+}

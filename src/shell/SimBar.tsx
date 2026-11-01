@@ -1,31 +1,47 @@
 import { useRef, useState } from 'preact/hooks';
 import type { AnyWaypoint } from '../core/navdb';
+import type { PanelInfo } from '../devices/types';
 import { initialSimState } from '../sim/defaults';
 import { useSim, useSimulator } from '../sim/hooks';
 import { clearSavedSimState } from '../sim/persist';
-import type { LateralMode, VerticalMode } from '../sim/types';
+import type { AutopilotState, LateralMode, VerticalMode } from '../sim/types';
+import { useSessionState } from './context';
 import { Icon } from './Icon';
+import { activeFailures } from './instructor/failures';
+import { InstructorPanel } from './instructor/InstructorPanel';
+import { LessonsPanel } from './lessons/LessonsPanel';
+import { LessonStrip } from './lessons/LessonStrip';
 
 /*
  * The simulator's own controls, separate from the avionics: pause and time
  * compression, a yoke and throttle for hand flying, a basic autopilot for
- * panels without one, and where the airplane is and what the weather does.
+ * panels without one and where the airplane is; the instructor station
+ * (failures, weather, scenarios) and the lessons sit in the same drawer.
  */
 
 const RATES = [1, 2, 4, 8];
 
-export function SimBar({ simAutopilot }: { simAutopilot: boolean }) {
+export type DrawerTab = 'fly' | 'position' | 'instructor' | 'lessons';
+
+const TABS: readonly { readonly id: DrawerTab; readonly name: string }[] = [
+  { id: 'fly', name: 'Fly' },
+  { id: 'position', name: 'Position' },
+  { id: 'instructor', name: 'Instructor' },
+  { id: 'lessons', name: 'Lessons' },
+];
+
+export function SimBar({ simAutopilot, panel }: { simAutopilot: boolean; panel: PanelInfo }) {
   const { state, derived, dispatch } = useSim();
-  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<DrawerTab | null>(null);
   const a = state.aircraft;
   const ap = state.ap;
-  const apText = ap.engaged
-    ? `AP ${ap.lateral} ${ap.vertical === 'IAS' ? 'FLC' : ap.vertical}${ap.altitudeArmed ? ' ALTS' : ''}`
-    : 'Hand flying';
+  const failed = activeFailures(state.systems.failures).length > 0;
+  const toggle = (t: DrawerTab) => setTab(tab === t ? null : t);
 
   return (
-    <div class={`simbar${open ? ' is-open' : ''}`}>
-      {open && <FlightDrawer simAutopilot={simAutopilot} onClose={() => setOpen(false)} />}
+    <div class={`simbar${tab ? ' is-open' : ''}`}>
+      {tab && <FlightDrawer tab={tab} onTab={setTab} simAutopilot={simAutopilot} panel={panel} onClose={() => setTab(null)} />}
+      {tab !== 'lessons' && <LessonStrip panel={panel} onOpen={() => setTab('lessons')} />}
       <div class="simbar-row">
         <button
           type="button"
@@ -49,16 +65,52 @@ export function SimBar({ simAutopilot }: { simAutopilot: boolean }) {
           <Readout label="HDG" value={`${String(Math.round(derived.headingMag) % 360 || 360).padStart(3, '0')}`} unit="°" />
           <Readout label="GS" value={`${Math.round(a.groundSpeedKt)}`} unit="kt" class="hide-narrow" />
           <span class={`simbar-ap${ap.engaged ? ' is-on' : ''}${derived.stalled ? ' is-stall' : ''}`}>
-            {derived.stalled ? 'STALL' : apText}
+            {derived.stalled ? 'STALL' : apStatus(ap, derived.vertical?.source ?? null)}
           </span>
         </div>
-        <button type="button" class={`simbar-fly${open ? ' is-active' : ''}`} onClick={() => setOpen(!open)} aria-expanded={open}>
+        <button
+          type="button"
+          class={`simbar-tool hide-narrow${tab === 'lessons' ? ' is-active' : ''}`}
+          onClick={() => toggle('lessons')}
+          aria-expanded={tab === 'lessons'}
+        >
+          <Icon name="book" />
+          <span>Lessons</span>
+        </button>
+        <button
+          type="button"
+          class={`simbar-tool hide-narrow${tab === 'instructor' ? ' is-active' : ''}`}
+          onClick={() => toggle('instructor')}
+          aria-expanded={tab === 'instructor'}
+          aria-label={failed ? 'Instructor, failures active' : 'Instructor'}
+        >
+          <Icon name="sliders" />
+          <span>Instructor</span>
+          {failed && <i class="simbar-alert" aria-hidden="true" />}
+        </button>
+        <button
+          type="button"
+          class={`simbar-fly${tab === 'fly' || tab === 'position' ? ' is-active' : tab ? ' is-open-narrow' : ''}`}
+          onClick={() => setTab(tab ? null : 'fly')}
+          aria-expanded={tab !== null}
+          aria-label={failed ? 'Fly, instructor and lessons. Failures active.' : 'Fly, instructor and lessons'}
+        >
           <Icon name="plane" />
           <span>Fly</span>
+          {failed && <i class="simbar-alert show-narrow" aria-hidden="true" />}
         </button>
       </div>
     </div>
   );
+}
+
+/** "AP NAV ALT · ALTS", "AP APR GP". */
+function apStatus(ap: AutopilotState, path: 'GP' | 'GS' | null): string {
+  if (!ap.engaged) return 'Hand flying';
+  const lateral = ap.lateral === 'NAV' && ap.approach ? 'APR' : ap.lateral;
+  const vertical = ap.vertical === 'IAS' ? 'FLC' : ap.vertical === 'GS' ? path ?? 'GS' : ap.vertical;
+  const armed = [ap.lateralArmed, ap.altitudeArmed && 'ALTS', ap.verticalArmed && (path ?? 'GS')].filter(Boolean).join(' ');
+  return `AP ${lateral} ${vertical}${armed ? ` · ${armed}` : ''}`;
 }
 
 function Readout({ label, value, unit, class: cls }: { label: string; value: string; unit: string; class?: string }) {
@@ -71,46 +123,69 @@ function Readout({ label, value, unit, class: cls }: { label: string; value: str
   );
 }
 
-function FlightDrawer({ simAutopilot, onClose }: { simAutopilot: boolean; onClose: () => void }) {
+function FlightDrawer({
+  tab,
+  onTab,
+  simAutopilot,
+  panel,
+  onClose,
+}: {
+  tab: DrawerTab;
+  onTab: (t: DrawerTab) => void;
+  simAutopilot: boolean;
+  panel: PanelInfo;
+  onClose: () => void;
+}) {
   const { state, dispatch } = useSim();
-  const [tab, setTab] = useState<'fly' | 'position' | 'weather'>('fly');
   return (
-    <div class="drawer" role="region" aria-label="Flight controls">
+    <div class="drawer" role="region" aria-label="Flight controls, instructor and lessons">
       <div class="drawer-tabs" role="tablist">
-        {(['fly', 'position', 'weather'] as const).map((t) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} class="drawer-tab" onClick={() => setTab(t)}>
-            {t === 'fly' ? 'Fly' : t === 'position' ? 'Position' : 'Weather'}
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            id={`drawer-tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls="drawer-panel"
+            class="drawer-tab"
+            onClick={() => onTab(t.id)}
+          >
+            {t.name}
           </button>
         ))}
-        <button type="button" class="icon-btn drawer-close" onClick={onClose} aria-label="Close flight controls">
+        <button type="button" class="icon-btn drawer-close" onClick={onClose} aria-label="Close the drawer">
           <Icon name="close" />
         </button>
       </div>
-      {tab === 'fly' && (
-        <div class="drawer-body drawer-fly">
-          <Yoke />
-          <div class="fly-controls">
-            <label class="throttle">
-              <span>
-                Throttle <strong>{Math.round(state.aircraft.engine.throttle * 100)}%</strong> · {Math.round(state.aircraft.engine.rpm)} RPM
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(state.aircraft.engine.throttle * 100)}
-                onInput={(e) => dispatch({ type: 'engine.throttle', value: Number((e.currentTarget as HTMLInputElement).value) / 100 })}
-              />
-            </label>
-            <button type="button" class="pill-btn" onClick={() => dispatch({ type: 'controls.level' })}>
-              Level off
-            </button>
-            {simAutopilot && <SimAutopilot />}
+      <div id="drawer-panel" role="tabpanel" aria-labelledby={`drawer-tab-${tab}`}>
+        {tab === 'fly' && (
+          <div class="drawer-body drawer-fly">
+            <Yoke />
+            <div class="fly-controls">
+              <label class="throttle">
+                <span>
+                  Throttle <strong>{Math.round(state.aircraft.engine.throttle * 100)}%</strong> · {Math.round(state.aircraft.engine.rpm)} RPM
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(state.aircraft.engine.throttle * 100)}
+                  onInput={(e) => dispatch({ type: 'engine.throttle', value: Number((e.currentTarget as HTMLInputElement).value) / 100 })}
+                />
+              </label>
+              <button type="button" class="pill-btn" onClick={() => dispatch({ type: 'controls.level' })}>
+                Level off
+              </button>
+              {simAutopilot && <SimAutopilot />}
+            </div>
           </div>
-        </div>
-      )}
-      {tab === 'position' && <PositionForm />}
-      {tab === 'weather' && <WeatherForm />}
+        )}
+        {tab === 'position' && <PositionForm />}
+        {tab === 'instructor' && <InstructorPanel panel={panel} />}
+        {tab === 'lessons' && <LessonsPanel panel={panel} />}
+      </div>
     </div>
   );
 }
@@ -158,10 +233,14 @@ function Yoke() {
 }
 
 function SimAutopilot() {
-  const { state, dispatch } = useSim();
+  const { state, derived, dispatch } = useSim();
   const ap = state.ap;
   const lat = (mode: LateralMode) => (
-    <button type="button" class={`ap-key${ap.engaged && ap.lateral === mode ? ' is-on' : ''}`} onClick={() => dispatch({ type: 'ap.lateral', mode })}>
+    <button
+      type="button"
+      class={`ap-key${ap.engaged && ap.lateral === mode && !(mode === 'NAV' && ap.approach) ? ' is-on' : ''}${ap.lateralArmed === mode ? ' is-armed' : ''}`}
+      onClick={() => dispatch({ type: 'ap.lateral', mode })}
+    >
       {mode}
     </button>
   );
@@ -185,6 +264,14 @@ function SimAutopilot() {
         </button>
         {lat('HDG')}
         {lat('NAV')}
+        <button
+          type="button"
+          class={`ap-key${ap.engaged && ap.approach ? ' is-on' : ''}${ap.verticalArmed ? ' is-armed' : ''}`}
+          onClick={() => dispatch({ type: 'ap.approach', on: !ap.approach })}
+          aria-label={`Approach mode${ap.verticalArmed ? `, ${derived.vertical?.source ?? 'GS'} armed` : ''}`}
+        >
+          APR
+        </button>
         {vert('ALT', 'ALT')}
         {vert('VS', 'VS')}
       </div>
@@ -193,7 +280,7 @@ function SimAutopilot() {
         <Stepper label="ALT sel" value={`${state.bugs.altitudeFt.toLocaleString('en-US')}`} onStep={(d) => dispatch({ type: 'bug.altitude', ft: state.bugs.altitudeFt + d * 100 })} />
         <Stepper label="VS" value={`${state.bugs.verticalSpeedFpm}`} onStep={(d) => dispatch({ type: 'bug.verticalSpeed', fpm: state.bugs.verticalSpeedFpm + d * 100 })} />
       </div>
-      <p class="sim-ap-note">No autopilot unit in this panel, so this generic one flies the bugs.</p>
+      <p class="sim-ap-note">No autopilot unit in this panel, so this generic one flies the bugs. APR couples the approach and arms the glidepath.</p>
     </div>
   );
 }
@@ -218,8 +305,8 @@ function PositionForm() {
   const { state, db, dispatch } = useSim();
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<AnyWaypoint | null>(null);
-  const [alt, setAlt] = useState(3500);
-  const [hdg, setHdg] = useState(360);
+  const [alt, setAlt] = useSessionState('pos.alt', 3500);
+  const [hdg, setHdg] = useSessionState('pos.hdg', 360);
   const results = query.trim().length >= 2 ? [...db.search(query, 6), ...db.searchByName(query, 6)].slice(0, 8) : [];
   const near = db.nearestAirports(state.aircraft, 1)[0];
   const nearest = near?.item;
@@ -297,58 +384,7 @@ function PositionForm() {
       </div>
       <p class="sim-ap-note">
         {nearest ? `Nearest airport now: ${nearest.ident}, ${Math.round(nearestNm)} nm. ` : ''}
-        Reset restores the default radios and the KJYO, MRB, KHGR flight plan.
-      </p>
-    </div>
-  );
-}
-
-function WeatherForm() {
-  const { state, dispatch } = useSim();
-  const env = state.env;
-  return (
-    <div class="drawer-body drawer-form">
-      <div class="field-row">
-        <label class="field">
-          <span>Wind from (°T)</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={Math.round(env.windFromTrue)}
-            step={10}
-            onInput={(e) => dispatch({ type: 'sim.wind', fromTrue: Number((e.currentTarget as HTMLInputElement).value) || 0, kt: env.windKt })}
-          />
-        </label>
-        <label class="field">
-          <span>Wind speed (kt)</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={Math.round(env.windKt)}
-            min={0}
-            max={80}
-            onInput={(e) => dispatch({ type: 'sim.wind', fromTrue: env.windFromTrue, kt: Number((e.currentTarget as HTMLInputElement).value) || 0 })}
-          />
-        </label>
-      </div>
-      <label class="field">
-        <span>Actual altimeter setting (inHg)</span>
-        <input
-          type="number"
-          inputMode="decimal"
-          value={env.qnhInHg.toFixed(2)}
-          step={0.01}
-          min={28}
-          max={31}
-          onChange={(e) => {
-            const v = Number((e.currentTarget as HTMLInputElement).value);
-            if (v >= 28 && v <= 31) dispatch({ type: 'sim.qnh', inHg: v });
-          }}
-        />
-      </label>
-      <p class="sim-ap-note">
-        Change the real pressure, then practice setting your altimeter: with the wrong setting the altimeter reads{' '}
-        {Math.abs(Math.round((state.bugs.baroInHg - env.qnhInHg) * 1000))} ft {state.bugs.baroInHg >= env.qnhInHg ? 'high' : 'low'} right now.
+        Reset restores the default radios and the KJYO, MRB, KHGR flight plan. Approach starts are in Instructor, Scenario.
       </p>
     </div>
   );

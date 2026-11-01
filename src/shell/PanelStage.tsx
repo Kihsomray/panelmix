@@ -24,8 +24,8 @@ interface Placed {
   readonly width: number;
 }
 
-/** The element's width, and the height left between its top and the sim bar. */
-function useSize<T extends HTMLElement>() {
+/** The element's width, and the height left between its top and the sim bar (plus `inset` above it). */
+function useSize<T extends HTMLElement>(inset: number) {
   const ref = useRef<T>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
@@ -33,7 +33,7 @@ function useSize<T extends HTMLElement>() {
     if (!el) return;
     const measure = () => {
       const top = el.getBoundingClientRect().top + window.scrollY;
-      setSize({ w: el.clientWidth, h: Math.max(window.innerHeight - top - SIMBAR_ALLOWANCE, 200) });
+      setSize({ w: el.clientWidth, h: Math.max(window.innerHeight - top - SIMBAR_ALLOWANCE - inset, 200) });
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -43,7 +43,7 @@ function useSize<T extends HTMLElement>() {
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, []);
+  }, [inset]);
   return [ref, size] as const;
 }
 
@@ -121,12 +121,15 @@ export function PanelStage({
   config,
   panel,
   onHelp,
+  bottomInset = 0,
 }: {
   config: PanelConfig;
   panel: PanelInfo;
   onHelp: (spec: DeviceSpec) => void;
+  /** Extra height taken above the sim bar (the lesson strip), px. */
+  bottomInset?: number;
 }) {
-  const [ref, size] = useSize<HTMLDivElement>();
+  const [ref, size] = useSize<HTMLDivElement>(bottomInset);
   const [focus, setFocus] = useState<Slot | null>(null);
 
   const pfd = device(config.pfd)!;
@@ -164,7 +167,7 @@ export function PanelStage({
   const focusedWidth = (p: Placed) =>
     focusWidth(
       { width: p.spec.width, height: p.spec.height },
-      { width: Math.min(window.innerWidth, size.w + 28) - 20, height: window.innerHeight - 64 - SIMBAR_ALLOWANCE - 34 },
+      { width: Math.min(window.innerWidth, size.w + 28) - 20, height: window.innerHeight - 64 - SIMBAR_ALLOWANCE - bottomInset - 34 },
     );
   const slot = (p: Placed) => {
     const isFocused = focus === p.slot;
