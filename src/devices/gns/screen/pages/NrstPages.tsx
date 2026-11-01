@@ -1,15 +1,15 @@
-import { bearingDistance, trafficFrequency } from '../../model/data';
+import { bearingDistance, bestApproach, trafficFrequency } from '../../model/data';
 import { LIST_ROWS } from '../../model/page';
 import type { PageId } from '../../model/types';
 import { at, brg, DataBox, dis, freqCom, freqNav, NotInDb, T, Title, V, type PageProps } from '../kit';
 import { FS } from '../parts';
-import { AirportSym, NavaidSym } from '../symbols';
+import { AirportSym, FixSym, NavaidSym } from '../symbols';
 
 /*
- * NRST group: nearest airports (identifier, bearing, distance, approach,
- * traffic frequency and longest runway), VORs and NDBs with live bearing and
- * distance. The trainer has no intersections, user waypoints, ARTCC, FSS or
- * airspace, so those pages say so.
+ * NRST group: nearest airports (identifier, bearing, distance, best
+ * approach, traffic frequency and longest runway), intersections, VORs and
+ * NDBs with live bearing and distance. The trainer has no user waypoints,
+ * ARTCC or FSS frequencies, so those pages say so.
  */
 
 function ScrollBar({ x, y, h, first, visible, total }: { x: number; y: number; h: number; first: number; visible: number; total: number }) {
@@ -78,9 +78,9 @@ export function NrstAirportPage(p: PageProps) {
               <T x={0} y={y} w={w * c.dis} size={fs.row} align="right">
                 <V v={dis(d)} u="nm" />
               </T>
-              {/* Approach types are not in the trainer database. */}
+              {/* The best approach: ILS, RNA(V), LOC, VOR, NDB or VFR when there is none. */}
               <T x={0} y={y} w={w * c.apr - 2} size={fs.row} align="right">
-                ___
+                {bestApproach(p.procedures, a.ident) ?? '___'}
               </T>
               <T x={0} y={line2} w={w * 0.2} size={fs.row} align="right">
                 {f?.tag ?? '___'}
@@ -165,8 +165,67 @@ export function NrstNavaidPage(p: PageProps & { kind: 'vor' | 'ndb' }) {
   );
 }
 
+/** The 25 nearest intersections within 200 nm, with bearing and distance. */
+export function NrstIntersectionPage(p: PageProps) {
+  const fs = FS[p.ui.model];
+  const { main } = p.lcd;
+  const visible = LIST_ROWS[p.ui.model].nrstNav;
+  const list = p.nearest.fixes;
+  const pos = p.state.aircraft;
+  const listY = fs.title + fs.label + 5;
+  const listH = main.h - listY - 2;
+  const rowH = listH / visible;
+  const w = main.w - 8;
+  const cols = { brg: 0.64, dis: 0.96 };
+  const shown = list.slice(p.ui.scroll, p.ui.scroll + visible);
+  return (
+    <>
+      <Title w={main.w} size={fs.title}>
+        NEAREST INTERSECTION
+      </Title>
+      <T x={6} y={fs.title + 3} size={fs.label} color="cyan" bold>
+        INT
+      </T>
+      <T x={0} y={fs.title + 3} w={w * cols.brg} size={fs.label} color="cyan" align="right" bold>
+        BRG
+      </T>
+      <T x={0} y={fs.title + 3} w={w * cols.dis} size={fs.label} color="cyan" align="right" bold>
+        DIS
+      </T>
+      <DataBox x={2} y={listY} w={w} h={listH}>
+        {list.length === 0 && (
+          <T x={0} y={listH / 2 - fs.label} w={w} size={fs.label} color="cyan" align="center">
+            No intersections within 200 nm
+          </T>
+        )}
+        {shown.map((f, i) => {
+          const index = p.ui.scroll + i;
+          const { brg: b, dis: d } = bearingDistance(p.mag, pos, f);
+          const y = 2 + i * rowH + (rowH - fs.row) / 2 - 1;
+          return (
+            <div key={`${f.ident}${f.lat}`}>
+              <T x={3} y={y} size={fs.row} sel={p.ui.cursor === index && !p.ui.popup}>
+                {f.ident}
+              </T>
+              <span style={{ position: 'absolute', left: `${w * 0.27}px`, top: `${y + 1}px` }}>
+                <FixSym size={fs.row * 0.85} />
+              </span>
+              <T x={0} y={y} w={w * cols.brg} size={fs.row} align="right">
+                <V v={brg(b)} u="mag" />
+              </T>
+              <T x={0} y={y} w={w * cols.dis - 2} size={fs.row} align="right">
+                <V v={dis(d)} u="nm" />
+              </T>
+            </div>
+          );
+        })}
+      </DataBox>
+      <ScrollBar x={main.w - 5} y={listY + 2} h={listH - 4} first={p.ui.scroll} visible={visible} total={list.length} />
+    </>
+  );
+}
+
 const MISSING: Partial<Record<PageId, { title: string; what: string }>> = {
-  'nrst.int': { title: 'NEAREST INTERSECTION', what: 'Intersections are' },
   'nrst.usr': { title: 'NEAREST USER', what: 'User waypoints are' },
   'nrst.artcc': { title: 'NEAREST ARTCC', what: 'ARTCC frequencies are' },
   'nrst.fss': { title: 'NEAREST FSS', what: 'FSS frequencies are' },

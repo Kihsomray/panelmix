@@ -1,16 +1,16 @@
-import type { SimCommand } from '../../../sim/commands';
 import { entryValue, turnLarge, turnSmall } from '../../../ui/identEntry';
-import { AUX_LOGIC, INITIAL_TIMER } from './aux';
+import { AUX_LOGIC, DEFAULT_SETTINGS, INITIAL_TIMER } from './aux';
 import { completer, DEFAULT_CRITERIA, findWaypoint } from './data';
 import { acceptDto, closeModal, DTO_STOP, dtoPage, openDto } from './dto';
-import { acceptFplWaypoint, FPL_LOGIC } from './fpl';
-import { DEFAULT_VNAV, defaultMap, NAV_LOGIC, procedureNotice } from './navPages';
+import { acceptFplWaypoint, activateLegWindow, FPL_LOGIC } from './fpl';
+import { DEFAULT_TERRAIN, DEFAULT_VNAV, defaultMap, NAV_LOGIC } from './navPages';
 import { NRST_LOGIC } from './nrst';
 import { clampStep, step, type PageLogic } from './page';
-import { currentPage, MAP_RANGES_NM, NAV_MAP_RANGES_NM, stepGroup, stepPage } from './pages';
+import { currentPage, MAP_RANGES_NM, NAV_MAP_RANGES_NM, PAGES, stepGroup, stepPage } from './pages';
+import { approachRequest, confirmProc, INITIAL_PROC, loadTerminal, openProcPage, procPage, requestApproach } from './proc';
 import { adjustVolume, EMERGENCY_KHZ, INITIAL_RADIO, pushVolume, toggleTuning, tune } from './radios';
 import type { FnPage, GnsCtx, GnsInput, GnsKey, GnsUi, MenuAction, Model, PageId, Popup, Step } from './types';
-import { acceptWpt, returnFromWpt, WPT_LOGIC } from './wpt';
+import { acceptWpt, chooseInWindow, returnFromWpt, wptWaypoint, WPT_LOGIC } from './wpt';
 
 /*
  * The GNS 430W / 530W as a pure reducer: (screen state, bezel input, sim
@@ -25,6 +25,7 @@ const LOGIC: Readonly<Record<PageId, PageLogic>> = {
   ...AUX_LOGIC,
   ...NRST_LOGIC,
   ...FPL_LOGIC,
+  proc: procPage,
   dto: dtoPage,
 } as Record<PageId, PageLogic>;
 
@@ -41,7 +42,7 @@ export function initialUi(model: Model): GnsUi {
     entry: null,
     stack: [],
     dto: { wp: null, planIndex: null },
-    wpt: { airport: null, vor: null, ndb: null, runway: 0 },
+    wpt: { airport: null, vor: null, ndb: null, int: null, runway: 0 },
     wptReturn: null,
     map: defaultMap(model),
     navRange: NAV_MAP_RANGES_NM.indexOf(10),
@@ -50,10 +51,18 @@ export function initialUi(model: Model): GnsUi {
     radio: INITIAL_RADIO,
     aux: { sub: null, timer: INITIAL_TIMER, criteria: DEFAULT_CRITERIA, tripLeg: 0 },
     vnav: DEFAULT_VNAV,
+    proc: INITIAL_PROC,
+    terrain: DEFAULT_TERRAIN,
+    settings: DEFAULT_SETTINGS,
   };
 }
 
 export function reduce(ui: GnsUi, input: GnsInput, ctx: GnsCtx): Step {
+  const r = route(ui, input, ctx);
+  return { ...r, ui: endFlow(r.ui) };
+}
+
+function route(ui: GnsUi, input: GnsInput, ctx: GnsCtx): Step {
   switch (input.kind) {
     case 'left':
       return tune(ui, ctx, input.ring, input.steps);
@@ -73,6 +82,15 @@ export function reduce(ui: GnsUi, input: GnsInput, ctx: GnsCtx): Step {
     case 'rightPush':
       return crsr(ui, ctx);
   }
+}
+
+const FLOW_PAGE = { approach: 'wpt.apr', arrival: 'wpt.arvl', departure: 'wpt.dep' } as const;
+
+/** The PROC flow ("Load?" / "Activate?" on the page) ends once its page is left. */
+function endFlow(ui: GnsUi): GnsUi {
+  const flow = ui.proc.flow;
+  if (!flow || currentPage(ui) === FLOW_PAGE[flow]) return ui;
+  return { ...ui, proc: { ...ui.proc, flow: null, waiting: false } };
 }
 
 const logicFor = (ui: GnsUi): PageLogic => LOGIC[currentPage(ui)];
@@ -120,16 +138,20 @@ function key(ui: GnsUi, k: GnsKey, ctx: GnsCtx): Step {
       return step(ui, [{ type: 'nav.swap', radio: 0 }]);
     case 'CDI':
       return step(ui, [{ type: 'cdi.cycle', sources: ctx.cdiSources }]);
-    case 'OBS':
-      return step(ui, [{ type: 'fms.obs', on: !ctx.state.fms.obsMode }]);
+    case 'OBS': {
+      // At SUSP (past the MAP, or a manual termination) OBS resumes sequencing into the missed approach.
+      const fms = ctx.state.fms;
+      if (fms.suspended && !fms.obsMode) return step(ui, [{ type: 'fms.unsuspend' }]);
+      return step(ui, [{ type: 'fms.obs', on: !fms.obsMode }]);
+    }
     case 'MSG':
       return ui.fn === 'msg' ? step(closeModal(ui)) : step(openModal(ui, 'msg'), [{ type: 'msg.readAll' }]);
     case 'FPL':
-      return step(toggleFn(ui, 'fpl'));
+      return step(toggleFn(ui, 'fpl', ctx));
     case 'PROC':
-      return step(toggleFn(ui, 'proc'));
+      return step(toggleFn(ui, 'proc', ctx));
     case 'VNAV':
-      return ui.model === '530' ? step(toggleFn(ui, 'vnav')) : step(ui);
+      return ui.model === '530' ? step(toggleFn(ui, 'vnav', ctx)) : step(ui);
     case 'DTO':
       return dtoKey(ui, ctx);
     case 'MENU':
@@ -149,11 +171,12 @@ function key(ui: GnsUi, k: GnsKey, ctx: GnsCtx): Step {
 }
 
 /** FPL, PROC and VNAV pages: the key opens the page, pressed again returns to the main pages. */
-function toggleFn(ui: GnsUi, fn: FnPage): GnsUi {
+function toggleFn(ui: GnsUi, fn: FnPage, ctx: GnsCtx): GnsUi {
   const base = { ...ui, popup: null, entry: null, stack: [], scroll: 0 };
   if (ui.fn === fn) return { ...base, fn: null, cursor: null };
-  // PROC opens with the cursor on "Select Approach?".
-  return { ...base, fn, fplPage: fn === 'fpl' ? 0 : ui.fplPage, cursor: fn === 'proc' ? 0 : null };
+  const opened: GnsUi = { ...base, fn, fplPage: fn === 'fpl' ? 0 : ui.fplPage, cursor: null };
+  // PROC opens with its cursor: on "Activate Approach?" with an approach loaded, else "Select Approach?".
+  return fn === 'proc' ? { ...opened, cursor: procPage.first?.(opened, ctx) ?? 0 } : opened;
 }
 
 function openModal(ui: GnsUi, fn: FnPage): GnsUi {
@@ -253,13 +276,18 @@ function movePopup(p: Popup, steps: number): Popup {
       return { ...p, index: i };
     }
     case 'confirm':
+    case 'procConfirm':
       return { ...p, yes: steps % 2 === 0 ? p.yes : !p.yes };
     case 'list':
       return { ...p, index: clampStep(p.index, steps, p.items.length) };
+    case 'choice':
+      return { ...p, index: clampStep(p.index, steps, p.options.length) };
     default:
       return p;
   }
 }
+
+const NAV_TERRAIN = (ui: GnsUi) => Math.max(PAGES[ui.model].NAV.indexOf('nav.terrain'), 0);
 
 function popupEnt(ui: GnsUi, p: Popup, ctx: GnsCtx): Step {
   const closed = { ...ui, popup: null };
@@ -270,38 +298,68 @@ function popupEnt(ui: GnsUi, p: Popup, ctx: GnsCtx): Step {
     }
     case 'confirm':
       if (!p.yes) return step(closed);
-      return p.action === 'fpl.delete'
-        ? step({ ...closed, cursor: null, scroll: 0 }, [{ type: 'fms.clear' }])
-        : followed(step({ ...closed, cursor: p.index }, [{ type: 'fms.remove', index: p.index }]), ctx);
+      if (p.action === 'fpl.delete') return step({ ...closed, cursor: null, scroll: 0 }, [{ type: 'fms.removeApproach' }, { type: 'fms.clear' }]);
+      if (p.action === 'fpl.removeApproach') return step({ ...closed, cursor: null, scroll: 0 }, [{ type: 'fms.removeApproach' }]);
+      return followed(step({ ...closed, cursor: p.index }, [{ type: 'fms.remove', index: p.index }]), ctx);
+    case 'procConfirm':
+      return confirmProc(closed, ctx, p);
     case 'activateLeg':
-      return step({ ...closed, cursor: null, scroll: 0 }, [{ type: 'fms.activateLeg', index: p.index }]);
+      return step(
+        { ...closed, cursor: null, scroll: 0 },
+        [p.target === 'plan' ? { type: 'fms.activateLeg', index: p.index } : { type: 'fms.activateApproachLeg', index: p.index }],
+      );
     case 'list': {
       const wp = p.items[p.index];
       if (!wp) return step(closed);
       if (p.purpose === 'navcom.airport') return step({ ...closed, navcomAirport: p.index });
-      return step({ ...closed, dto: { wp, planIndex: p.purpose === 'dto.fpl' ? p.index : null }, cursor: DTO_STOP.activate });
+      // Enroute waypoints keep their place in the plan; approach fixes are found by the FMS.
+      const planIndex = p.purpose === 'dto.fpl' && p.index < ctx.state.fms.plan.length ? p.index : null;
+      return step({ ...closed, dto: { wp, planIndex }, cursor: DTO_STOP.activate });
     }
+    case 'choice': {
+      const o = p.options[p.index];
+      return o ? followed(step(chooseInWindow(closed, ctx, p.field, o.value)), ctx) : step(closed);
+    }
+    case 'terrainAlert':
+      // "Press the ENT key" to acknowledge and display the TERRAIN page.
+      return step({ ...defaultNavPage(closed), pages: { ...ui.pages, NAV: NAV_TERRAIN(ui) } });
     case 'notice':
       return step(closed);
   }
 }
 
 function menuAction(ui: GnsUi, action: MenuAction, ctx: GnsCtx): Step {
-  const cmds: SimCommand[] = [];
   switch (action) {
     case 'fpl.activateLeg':
-      return ui.cursor === null ? step(ui) : step({ ...ui, popup: { kind: 'activateLeg', index: ui.cursor } });
+      return step(activateLegWindow(ui, ctx.state.fms));
     case 'fpl.invert':
-      cmds.push({ type: 'fms.invert' });
-      return step({ ...ui, cursor: null, scroll: 0 }, cmds);
+      return step({ ...ui, cursor: null, scroll: 0 }, [{ type: 'fms.invert' }]);
     case 'fpl.delete':
       return step({ ...ui, popup: { kind: 'confirm', action: 'fpl.delete', index: 0, yes: true } });
-    case 'fpl.selectApproach':
-      return step({ ...ui, popup: procedureNotice(ctx, 'Approach') });
-    case 'fpl.selectArrival':
-      return step({ ...ui, popup: procedureNotice(ctx, 'Arrival') });
-    case 'fpl.selectDeparture':
-      return step({ ...ui, popup: procedureNotice(ctx, 'Departure') });
+    case 'fpl.removeApproach':
+      // "A confirmation window will appear listing the approach."
+      return step({ ...ui, popup: { kind: 'confirm', action: 'fpl.removeApproach', index: 0, yes: true } });
+    case 'proc.selectApproach':
+      return step(openProcPage(ui, ctx, 'approach'));
+    case 'proc.selectArrival':
+      return step(openProcPage(ui, ctx, 'arrival'));
+    case 'proc.selectDeparture':
+      return step(openProcPage(ui, ctx, 'departure'));
+    case 'proc.loadIntoFpl':
+    case 'proc.loadAndActivate': {
+      const airport = wptWaypoint(ui, ctx, 'airport');
+      if (!airport) return step(ui);
+      const page = currentPage(ui);
+      if (page !== 'wpt.apr') return loadTerminal(ui, ctx, page === 'wpt.dep' ? 'departure' : 'arrival', airport);
+      const load = approachRequest(ui, ctx, airport, action === 'proc.loadAndActivate' ? 'activate' : 'load');
+      return load ? requestApproach(ui, ctx, load) : step(ui);
+    }
+    case 'proc.destination': {
+      const page = currentPage(ui);
+      const kind = page === 'wpt.dep' ? 'departure' : page === 'wpt.arvl' ? 'arrival' : 'approach';
+      const opened = openProcPage(ui, ctx, kind);
+      return step({ ...opened, popup: null, cursor: null, proc: { ...opened.proc, flow: null, waiting: false } });
+    }
     case 'dto.cancel':
       return step(closeModal(ui), [{ type: 'fms.cancelDirectTo' }]);
     case 'map.fields':
@@ -312,6 +370,12 @@ function menuAction(ui: GnsUi, action: MenuAction, ctx: GnsCtx): Step {
       return step({ ...ui, navRange: NAV_MAP_RANGES_NM.indexOf(10) });
     case 'vnav.restore':
       return step({ ...ui, vnav: DEFAULT_VNAV });
+    case 'terrain.inhibit':
+      return step({ ...ui, terrain: { ...ui.terrain, inhibited: !ui.terrain.inhibited } });
+    case 'terrain.view':
+      return step({ ...ui, terrain: { ...ui.terrain, view: ui.terrain.view === 360 ? 120 : 360 } });
+    case 'terrain.aviation':
+      return step({ ...ui, terrain: { ...ui.terrain, aviation: !ui.terrain.aviation } });
     case 'none':
       return step(ui);
   }

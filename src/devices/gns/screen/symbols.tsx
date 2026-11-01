@@ -67,9 +67,47 @@ export function LegArrow({ w }: { w: number }) {
   );
 }
 
+/** Intersection: the cyan triangle. */
+export function FixSym({ size }: { size: number }) {
+  return (
+    <svg class="gns-sym" width={size} height={size} viewBox="-6 -6 12 12" aria-hidden="true">
+      <path d="M0 -4.6L4.4 3.8H-4.4Z" fill="#2ad8ff" />
+    </svg>
+  );
+}
+
 /** The symbol for whatever kind of waypoint a record is (nothing for user waypoints). */
 export function WaypointSym({ w, size }: { w: AnyWaypoint | undefined; size: number }) {
   if (w && isAirportRecord(w)) return <AirportSym a={w} size={size} />;
   if (w && isNavaidRecord(w)) return <NavaidSym n={w} size={size} />;
+  if (w?.kind === 'fix') return <FixSym size={size} />;
   return null;
+}
+
+/** The racetrack shown before the holding fix on the active leg line. */
+export function HoldGlyph({ w }: { w: number }) {
+  return (
+    <svg class="gns-sym" width={w} height={w * 0.45} viewBox="0 0 24 11" aria-hidden="true">
+      <rect x="1.2" y="1.2" width="21.6" height="8.6" rx="4.3" fill="none" stroke="#ff40ff" stroke-width="2" />
+    </svg>
+  );
+}
+
+/** The procedure turn symbol: out along the course, the 45 degree leg and the turn back. */
+export function ProcTurnGlyph({ w }: { w: number }) {
+  return (
+    <svg class="gns-sym" width={w} height={w * 0.45} viewBox="0 0 26 12" aria-hidden="true">
+      <path d="M1 3H14M14 3L21 8.5A2.6 2.6 0 0 0 23.6 4.2L17 3" fill="none" stroke="var(--gns-green)" stroke-width="1.8" />
+    </svg>
+  );
+}
+
+/** The DME arc symbol between two fixes. */
+export function ArcGlyph({ w }: { w: number }) {
+  return (
+    <svg class="gns-sym" width={w} height={w * 0.5} viewBox="0 0 22 11" aria-hidden="true">
+      <path d="M2 9A9 7 0 0 1 18 4" fill="none" stroke="#ff40ff" stroke-width="2.2" />
+      <path d="M15.5 1.2L20 4.6L15.4 6.8Z" fill="#ff40ff" />
+    </svg>
+  );
 }

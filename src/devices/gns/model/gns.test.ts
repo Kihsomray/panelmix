@@ -1,72 +1,16 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { MagneticModel, type MagvarGrid } from '../../../core/magvar';
-import { NavDatabase, type RawNavdata } from '../../../core/navdb';
-import { initialSimState } from '../../../sim/defaults';
-import { Simulator } from '../../../sim/simulator';
-import { IDENT_CHARS } from '../../../ui/identEntry';
 import { bearing, destination } from '../../../core/geo';
+import { NavDatabase } from '../../../core/navdb';
+import { Simulator } from '../../../sim/simulator';
+import { initialSimState } from '../../../sim/defaults';
 import { advisory } from './advisory';
 import { timerSeconds } from './aux';
-import { frequencyRows, nearestLists, trafficFrequency } from './data';
+import { frequencyRows, trafficFrequency } from './data';
 import { DTO_STOP } from './dto';
 import { currentPage, MAP_RANGES_NM, pageIndicator, PAGES } from './pages';
 import { tuningTarget, VLOC_CURSOR_TIMEOUT_S } from './radios';
-import { initialUi, reduce } from './reducer';
-import type { GnsInput, GnsKey, GnsUi, Model } from './types';
-
-const db = new NavDatabase(JSON.parse(readFileSync('public/data/navdata.json', 'utf8')) as RawNavdata);
-const mag = new MagneticModel(JSON.parse(readFileSync('public/data/magvar.json', 'utf8')) as MagvarGrid);
-
-const key = (k: GnsKey): GnsInput => ({ kind: 'key', key: k });
-const small = (steps = 1): GnsInput => ({ kind: 'right', ring: 'inner', steps });
-const large = (steps = 1): GnsInput => ({ kind: 'right', ring: 'outer', steps });
-const CRSR: GnsInput = { kind: 'rightPush' };
-
-/** A GNS wired to a real simulator: inputs go through the reducer, commands into the sim. */
-function rig(model: Model = '430') {
-  const sim = new Simulator(db, mag, initialSimState());
-  let ui: GnsUi = initialUi(model);
-  let now = 100;
-  const ctx = () => ({
-    state: sim.getState(),
-    db,
-    mag,
-    nearest: nearestLists(db, sim.getState().aircraft, ui.aux.criteria),
-    cdiSources: ['GPS', 'NAV1'] as const,
-    now,
-  });
-  return {
-    sim,
-    get ui() {
-      return ui;
-    },
-    get page() {
-      return currentPage(ui);
-    },
-    nearest: () => ctx().nearest,
-    send(...inputs: GnsInput[]) {
-      for (const input of inputs) {
-        const r = reduce(ui, input, ctx());
-        ui = r.ui;
-        for (const c of r.cmds) sim.dispatch(c);
-      }
-    },
-    wait(seconds: number) {
-      now += seconds;
-    },
-    /** Spells an identifier with the right knobs, starting from what the field shows. */
-    spell(ident: string, shown = '') {
-      for (let i = 0; i < ident.length; i++) {
-        const e = ui.entry?.e;
-        const current = e ? e.text[e.cursor] ?? ' ' : shown[0] ?? ' ';
-        const steps = IDENT_CHARS.indexOf(ident[i]!) - IDENT_CHARS.indexOf(current);
-        if (steps !== 0 || !ui.entry) this.send(small(steps === 0 ? IDENT_CHARS.length : steps));
-        if (i < ident.length - 1) this.send(large(1));
-      }
-    },
-  };
-}
+import { CRSR, db, key, large, mag, rig, small } from './testRig';
+import type { GnsInput, GnsKey, GnsUi } from './types';
 
 describe('COM and VLOC tuning (left side)', () => {
   it('tunes the COM standby MHz and kHz with the left knobs and flips it active', () => {
@@ -289,7 +233,7 @@ describe('active flight plan', () => {
     r.send(key('FPL'), CRSR, large(1), key('MENU'));
     expect(r.ui.popup?.kind).toBe('menu');
     r.send(key('ENT'));
-    expect(r.ui.popup).toEqual({ kind: 'activateLeg', index: 2 });
+    expect(r.ui.popup).toEqual({ kind: 'activateLeg', target: 'plan', index: 2 });
     r.send(key('ENT'));
     expect(r.sim.getState().fms.activeLeg).toMatchObject({ planIndex: 2, isDirectTo: false });
 
@@ -375,15 +319,18 @@ describe('nearest and waypoint pages', () => {
 });
 
 describe('PROC, AUX and VNAV', () => {
-  it('answers honestly that procedures are not in the trainer database', () => {
+  it('opens the destination approach page with its APR window from PROC', () => {
     const r = rig();
     r.send(key('PROC'));
     expect(r.page).toBe('proc');
+    // Nothing loaded: the cursor starts on "Select Approach?" (the two Activate lines are skipped).
     expect(r.ui.cursor).toBe(0);
     r.send(key('ENT'));
-    expect(r.ui.popup).toMatchObject({ kind: 'notice', lines: ['KHGR', 'Approaches are not in the', 'trainer database.'] });
-    r.send(key('CLR'), key('PROC'));
-    expect(r.page).toBe('nav.default');
+    expect(r.page).toBe('wpt.apr');
+    expect(r.ui.wpt.airport?.ident).toBe('KHGR');
+    expect(r.ui.popup).toMatchObject({ kind: 'choice', field: 'approach' });
+    r.send(key('CLR'), key('PROC'), key('PROC'));
+    expect(r.page).toBe('wpt.apr');
   });
 
   it('runs the generic timer on the Utility page', () => {
@@ -428,7 +375,7 @@ describe('turn advisories', () => {
     const at = (from: { lat: number; lon: number }, nm: number) => {
       const p = destination(mrb, bearing(mrb, from), nm);
       s.dispatch({ type: 'sim.reposition', lat: p.lat, lon: p.lon, altitudeFt: 3500, headingTrue: bearing(p, mrb), iasKt: 100 });
-      return advisory(s.getDerived().gps, 100, mag);
+      return advisory(s.getDerived().gps, s.getState().fms, 100, s.getState().aircraft.trackTrue, mag);
     };
     expect(at(kjyo, 10)).toBe(null);
     // KJYO -> MRB -> KHGR turns right about 50 degrees: the lead starts about 0.8 nm out.
@@ -437,7 +384,7 @@ describe('turn advisories', () => {
     const khgr = db.airport('KHGR')!;
     const p = destination(khgr, bearing(khgr, mrb), 0.2);
     s.dispatch({ type: 'sim.reposition', lat: p.lat, lon: p.lon, altitudeFt: 3500, headingTrue: bearing(p, khgr), iasKt: 100 });
-    expect(advisory(s.getDerived().gps, 100, mag)).toBe('ARRIVING WPT');
+    expect(advisory(s.getDerived().gps, s.getState().fms, 100, s.getState().aircraft.trackTrue, mag)).toBe('ARRIVING WPT');
   });
 });
 

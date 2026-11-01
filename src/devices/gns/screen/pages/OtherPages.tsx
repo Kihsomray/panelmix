@@ -1,8 +1,10 @@
 import type { ComponentChildren } from 'preact';
 import { formatEte } from '../../../../ui/format';
 import { distanceNm, bearing } from '../../../../core/geo';
-import { AUX_ITEMS, AUX_TITLE, CRITERIA_STOP, CRITERIA_SURFACE_LABEL, TIMER_STOP, timerSeconds, type AuxPage } from '../../model/aux';
-import { PROC_OPTIONS, VNAV_STOP } from '../../model/navPages';
+import { AUX_ITEMS, AUX_TITLE, CDI_STOP, CRITERIA_STOP, CRITERIA_SURFACE_LABEL, TIMER_STOP, timerSeconds, type AuxPage } from '../../model/aux';
+import { unitMessages } from '../../model/messages';
+import { VNAV_STOP } from '../../model/navPages';
+import { gnsApproachName, PROC_ITEMS, procItems } from '../../model/proc';
 import type { AuxSub } from '../../model/types';
 import { brg, clock, DataBox, dis, hms, NotInDb, speed, T, Title, V, type PageProps } from '../kit';
 import { FS } from '../parts';
@@ -14,7 +16,7 @@ import { FS } from '../parts';
 export function MsgPage(p: PageProps) {
   const fs = FS[p.ui.model];
   const { main } = p.lcd;
-  const msgs = [...p.state.messages].reverse();
+  const msgs = unitMessages(p.state.messages).reverse();
   const lineH = fs.row * 1.35;
   const max = Math.floor((main.h - fs.title - 8) / lineH);
   return (
@@ -33,23 +35,34 @@ export function MsgPage(p: PageProps) {
   );
 }
 
+/**
+ * The PROCEDURES page: the two "Activate" lines are dimmed (and skipped by
+ * the cursor) until an approach is loaded. The 530W lists the loaded
+ * procedures below.
+ */
 export function ProcPage(p: PageProps) {
   const fs = FS[p.ui.model];
   const { main } = p.lcd;
   const big = p.ui.model === '530';
   const rowH = fs.row * 1.38;
-  const boxH = rowH * PROC_OPTIONS.length + 6;
-  let stop = -1;
+  const boxH = rowH * PROC_ITEMS.length + 6;
+  const reachable = procItems(p.state.fms);
+  const a = p.state.fms.approach;
+  const loaded = [
+    ['APR', a ? `${a.airport.ident} - ${gnsApproachName(a.approach)}` : '____ -'],
+    ['ARVL', '____ -'],
+    ['DEP', '____ -'],
+  ] as const;
   return (
     <>
       <Title w={main.w} size={fs.title}>
         PROCEDURES
       </Title>
       <DataBox x={2} y={fs.title + 4} w={main.w - 4} h={boxH}>
-        {PROC_OPTIONS.map((o, i) => {
-          if (o.enabled) stop++;
+        {PROC_ITEMS.map((o, i) => {
+          const stop = reachable.indexOf(o.item);
           return (
-            <T key={o.label} x={4} y={3 + i * rowH} size={fs.row} color={o.enabled ? 'green' : 'dim'} sel={o.enabled && p.ui.cursor === stop && !p.ui.popup}>
+            <T key={o.label} x={4} y={3 + i * rowH} size={fs.row} color={stop >= 0 ? 'green' : 'dim'} sel={stop >= 0 && p.ui.cursor === stop && !p.ui.popup}>
               {o.label}
             </T>
           );
@@ -61,13 +74,13 @@ export function ProcPage(p: PageProps) {
             LOADED PROCEDURES
           </T>
           <DataBox x={2} y={fs.title + boxH + fs.label + 13} w={main.w - 4} h={main.h - (fs.title + boxH + fs.label + 15)}>
-            {['APR', 'ARVL', 'DEP'].map((k, i) => (
+            {loaded.map(([k, v], i) => (
               <div key={k}>
                 <T x={4} y={5 + i * rowH} size={fs.label} color="cyan" bold>
                   {k}
                 </T>
                 <T x={fs.label * 4} y={3 + i * rowH} size={fs.row}>
-                  ____ -
+                  {v}
                 </T>
               </div>
             ))}
@@ -320,6 +333,41 @@ function DaltSub(p: PageProps) {
   );
 }
 
+/** AUX Setup 1, CDI / Alarms: the CDI scale (Auto), the scale in use, ILS CDI selection and the arrival alarm. */
+function CdiSub(p: PageProps) {
+  const fs = FS[p.ui.model];
+  const w = p.lcd.main.w - 4;
+  const s = p.ui.settings;
+  const sel = (stop: number) => p.ui.cursor === stop && !p.ui.popup;
+  const half = w / 2 - 2;
+  const y = fs.title + 5;
+  const rowStep = fs.label + fs.row + 12;
+  return (
+    <>
+      <Field p={p} x={2} y={y} w={half} label="SELECTED CDI">
+        Auto
+      </Field>
+      <Field p={p} x={half + 6} y={y} w={half} label="SYSTEM CDI">
+        <V v={p.derived.gps.fullScaleNm.toFixed(2)} u="nm" />
+      </Field>
+      <Field p={p} x={2} y={y + rowStep} w={w} label="ILS CDI SELECTION" sel={sel(CDI_STOP.ilsCdi)}>
+        {s.ilsCdi === 'auto' ? 'Auto' : 'Manual'}
+      </Field>
+      <T x={4} y={y + rowStep * 2} size={fs.label} color="cyan" bold>
+        ARRIVAL ALARM
+      </T>
+      <DataBox x={2} y={y + rowStep * 2 + fs.label + 2} w={w} h={fs.row + 5}>
+        <T x={6} y={2.5} size={fs.row} sel={sel(CDI_STOP.arrival)}>
+          {s.arrivalAlarm ? 'On' : 'Off'}
+        </T>
+        <T x={0} y={2.5} w={w - 4} size={fs.row} align="right" sel={sel(CDI_STOP.arrivalNm)}>
+          <V v={s.arrivalNm.toFixed(2)} u="nm" />
+        </T>
+      </DataBox>
+    </>
+  );
+}
+
 function InfoSub(p: PageProps & { lines: readonly string[] }) {
   const fs = FS[p.ui.model];
   const { main } = p.lcd;
@@ -357,7 +405,7 @@ export function AuxPageView(p: PageProps & { page: AuxPage }) {
         body = <InfoSub {...p} lines={['PanelMix trainer', `Nav database ${p.db.built.slice(0, 10)}`, `${p.db.airports.length} airports`, `${p.db.navaids.length} navaids`]} />;
         break;
       case 'cdi':
-        body = <InfoSub {...p} lines={['Selected CDI  Auto', `System CDI  ${p.derived.gps.scale}  ${p.derived.gps.fullScaleNm.toFixed(1)} nm`, 'Arrival alarm  Off']} />;
+        body = <CdiSub {...p} />;
         break;
       default:
         body = (

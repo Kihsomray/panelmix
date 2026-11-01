@@ -1,12 +1,13 @@
 import { step, type PageLogic } from './page';
-import type { AuxSub, GenericTimer, GnsCtx, GnsUi, NearestCriteria, PageId, RunwaySurfaceCriteria } from './types';
+import type { AuxSub, GenericTimer, GnsCtx, GnsUi, NearestCriteria, PageId, RunwaySurfaceCriteria, UnitSettings } from './types';
 
 /*
  * AUX group (Section 9): four menu pages. Highlight an item with the cursor
  * and press ENT to open it; CLR goes back. Working items: Flight Timers
  * (generic count up/down timer), Trip Planning, Density Alt / TAS / Winds,
- * CDI / Alarms, Nearest Airport Criteria (filters the NRST list) and the
- * database versions. The rest open honestly empty.
+ * CDI / Alarms (ILS CDI auto or manual, the arrival alarm), Nearest Airport
+ * Criteria (filters the NRST list) and the database versions. The rest open
+ * honestly empty.
  */
 
 export type AuxPage = 'aux.fplan' | 'aux.util' | 'aux.setup1' | 'aux.setup2';
@@ -60,12 +61,16 @@ export function timerSeconds(t: GenericTimer, now: number): number {
 
 export const TIMER_STOP = { startStop: 0, direction: 1, time: 2 } as const;
 export const CRITERIA_STOP = { surface: 0, length: 1 } as const;
+export const CDI_STOP = { ilsCdi: 0, arrival: 1, arrivalNm: 2 } as const;
+
+/** Factory settings: automatic ILS CDI selection, arrival alarm off. */
+export const DEFAULT_SETTINGS: UnitSettings = { ilsCdi: 'auto', arrivalAlarm: false, arrivalNm: 1 };
 
 const CRITERIA_SURFACES: readonly RunwaySurfaceCriteria[] = ['any', 'hard', 'hard-soft'];
 export const CRITERIA_SURFACE_LABEL: Record<RunwaySurfaceCriteria, string> = { any: 'Any', hard: 'Hard only', 'hard-soft': 'Hard/soft' };
 const MAX_MIN_LENGTH_FT = 9900;
 
-const SUB_STOPS: Partial<Record<AuxSub, number>> = { timers: 3, nearestApt: 2, trip: 1 };
+const SUB_STOPS: Partial<Record<AuxSub, number>> = { timers: 3, nearestApt: 2, trip: 1, cdi: 3 };
 
 const subStops = (ui: GnsUi) => (ui.aux.sub ? SUB_STOPS[ui.aux.sub] ?? 0 : 0);
 
@@ -99,6 +104,13 @@ function smallInSub(ui: GnsUi, ctx: GnsCtx, stop: number, steps: number): GnsUi 
       // 0 is the whole plan ("CUM"), i the leg ending at plan[i].
       const options = Math.max(ctx.state.fms.plan.length, 1);
       return { ...ui, aux: { ...ui.aux, tripLeg: (((ui.aux.tripLeg + steps) % options) + options) % options } };
+    }
+    case 'cdi': {
+      const s = ui.settings;
+      if (stop === CDI_STOP.ilsCdi) return { ...ui, settings: { ...s, ilsCdi: s.ilsCdi === 'auto' ? 'manual' : 'auto' } };
+      if (stop === CDI_STOP.arrival) return { ...ui, settings: { ...s, arrivalAlarm: !s.arrivalAlarm } };
+      const arrivalNm = Math.min(Math.max(Math.round((s.arrivalNm + steps * 0.1) * 10) / 10, 0.1), 9.9);
+      return { ...ui, settings: { ...s, arrivalNm } };
     }
     default:
       return null;

@@ -2,11 +2,12 @@ import { NavDatabase } from '../../../core/navdb';
 import { airportOf, frequencyRows, navcomAirports, waypointAt } from './data';
 import { item, LIST_ROWS, loadStandby, step, type PageLogic } from './page';
 import { MAP_RANGES_NM, NAV_MAP_RANGES_NM } from './pages';
-import type { GnsCtx, GnsUi, MapUi, PageId, VnavUi } from './types';
+import type { GnsCtx, GnsUi, MapUi, PageId, TerrainUi, VnavUi } from './types';
 import { openWpt, planIndexOf } from './wpt';
 
 /*
- * NAV group pages plus the PROC, MSG and VNAV function pages.
+ * NAV group pages (Default NAV, Map, TERRAIN, NAVCOM, Position, Satellite,
+ * VNAV) plus the MSG and VNAV function pages. The PROC page is in proc.ts.
  */
 
 const clampIndex = (i: number, n: number) => Math.min(Math.max(i, 0), n - 1);
@@ -145,51 +146,37 @@ const vnav: PageLogic = {
   menu: () => [item('VNAV Messages On?', 'none', false), item('Restore Defaults?', 'vnav.restore')],
 };
 
-export const PROC_OPTIONS = [
-  { label: 'Activate Vector-To-Final?', enabled: false },
-  { label: 'Activate Approach?', enabled: false },
-  { label: 'Select Approach?', enabled: true },
-  { label: 'Select Arrival?', enabled: true },
-  { label: 'Select Departure?', enabled: true },
-] as const;
+/** TERRAIN page display ranges: "1 NM, 2 NM, 5 NM, 10 NM, 25 NM, 50 NM, 100 NM". */
+export const TERRAIN_RANGES_NM: readonly number[] = [1, 2, 5, 10, 25, 50, 100];
 
-/** The selectable PROC options (nothing loaded, so the two "Activate" lines are unavailable). */
-const PROC_STOPS = PROC_OPTIONS.filter((o) => o.enabled);
+export const DEFAULT_TERRAIN: TerrainUi = { view: 360, range: TERRAIN_RANGES_NM.indexOf(10), aviation: false, inhibited: false };
 
-const proc: PageLogic = {
-  stops: () => PROC_STOPS.length,
-  ent: (ui, ctx, stop) => {
-    const kind = (['Approach', 'Arrival', 'Departure'] as const)[stop];
-    return kind ? step({ ...ui, popup: procedureNotice(ctx, kind) }) : null;
-  },
+/**
+ * TERRAIN page: RNG changes the range, CLR shows or hides aviation data,
+ * MENU inhibits alerts, switches the 360 and 120 degree views and the
+ * aviation data.
+ */
+const terrain: PageLogic = {
+  stops: () => 0,
+  range: (ui, delta) => ({ ...ui, terrain: { ...ui.terrain, range: clampIndex(ui.terrain.range + delta, TERRAIN_RANGES_NM.length) } }),
+  clr: (ui, _ctx, stop) => (stop === null ? step({ ...ui, terrain: { ...ui.terrain, aviation: !ui.terrain.aviation } }) : null),
+  menu: (ui) => [
+    item(ui.terrain.inhibited ? 'Enable Terrain?' : 'Inhibit Terrain?', 'terrain.inhibit'),
+    item(ui.terrain.view === 360 ? 'View 120°?' : 'View 360°?', 'terrain.view'),
+    item(ui.terrain.aviation ? 'Hide Aviation Data?' : 'Show Aviation Data?', 'terrain.aviation'),
+  ],
 };
-
-/** The airport a procedure would be loaded for, and the honest answer. */
-export function procedureNotice(ctx: GnsCtx, kind: 'Approach' | 'Arrival' | 'Departure'): GnsUi['popup'] {
-  const plan = ctx.state.fms.plan;
-  const leg = ctx.state.fms.activeLeg;
-  const destination = leg && leg.planIndex === null ? leg.to : plan[plan.length - 1] ?? leg?.to ?? null;
-  const departure = plan[0] ?? ctx.nearest.airports[0] ?? null;
-  const apt = kind === 'Departure' ? departure : destination;
-  const name = kind === 'Approach' ? 'Approaches' : kind === 'Arrival' ? 'Arrivals' : 'Departures';
-  return {
-    kind: 'notice',
-    title: `SELECT ${kind.toUpperCase()}`,
-    lines: [apt?.kind === 'airport' ? apt.ident : 'No airport', `${name} are not in the`, 'trainer database.'],
-  };
-}
 
 const none: PageLogic = { stops: () => 0 };
 
 export const NAV_LOGIC: Partial<Record<PageId, PageLogic>> = {
   'nav.default': defaultNav,
   'nav.map': map,
-  'nav.terrain': none,
+  'nav.terrain': terrain,
   'nav.navcom': navcom,
   'nav.position': none,
   'nav.satellite': none,
   'nav.vnav': vnav,
   vnav,
-  proc,
   msg: none,
 };

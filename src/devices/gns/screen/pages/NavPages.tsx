@@ -3,6 +3,7 @@ import type { MapProjection } from '../../../../ui/map/paintMap';
 import { formatEte } from '../../../../ui/format';
 import { bearingDistance } from '../../model/data';
 import { formatMapRange, MAP_RANGES_NM, NAV_MAP_RANGES_NM } from '../../model/pages';
+import { legView } from '../../model/legView';
 import { pointedWaypoint } from '../../model/navPages';
 import { at, brg, DataBox, dis, fit, latLines, speed, T, Unit, V, type PageProps } from '../kit';
 import { CdiBar, FS, LegLine, MapView } from '../parts';
@@ -13,9 +14,18 @@ import { CdiBar, FS, LegLine, MapView } from '../parts';
  * Map page with its panning pointer.
  */
 
+/**
+ * Without a GPS position the unit dead reckons en route; in the terminal area
+ * and on approaches "all navigation data will be dashed".
+ */
+export const noPosition = (p: PageProps) => !p.derived.systems.gpsValid && (p.derived.gps.phase ?? p.derived.gps.scale) !== 'ENR';
+
 /** Labels and values of the default NAV data fields. */
 function navFields(p: PageProps) {
   const g = p.derived.gps;
+  if (noPosition(p)) {
+    return { DIS: <V v="__._" u="nm" />, DTK: <V v="___" u="mag" />, BRG: <V v="___" u="mag" />, GS: <V v="___" u="kt" />, TRK: <V v="___" u="mag" />, ETE: <V v="__:__" /> };
+  }
   return {
     DIS: <V v={dis(g.distanceNm, true)} u="nm" />,
     DTK: <V v={brg(g.dtkMag)} u="mag" />,
@@ -37,7 +47,7 @@ export function DefaultNav430(p: PageProps) {
     <>
       <CdiBar x={2} y={3} w={w} h={27} gps={p.derived.gps} dots={5} labels />
       <DataBox x={2} y={34} w={w} h={19}>
-        <LegLine x={0} y={0} w={w} h={19} gps={p.derived.gps} size={fs.row + 1} />
+        <LegLine x={0} y={0} w={w} h={19} view={legView(p.state, p.derived.gps)} size={fs.row + 1} />
       </DataBox>
       {top.map((k, i) => (
         <T key={k} x={cols(i)} y={56} w={w / 3} size={fs.label} color="cyan" align="center" bold>
@@ -130,6 +140,7 @@ export function DefaultNav530(p: PageProps) {
         upTrue={a.trackTrue}
         ownshipAt={at0}
         route={{ plan: p.state.fms.plan, activeLeg: p.state.fms.activeLeg }}
+        {...mapLayers(p)}
         symbolScale={0.62}
         label="Look-ahead map, track up"
         overlayKey={`${Math.round(trackMag * 2)}|${bugOff === null ? '-' : Math.round(bugOff)}`}
@@ -169,7 +180,8 @@ export function DefaultNav530(p: PageProps) {
         {r.value}
         <Unit u={r.unit} />
       </T>
-      <LegLine x={20} y={mapH - 6} w={main.w - 40} h={22} gps={g} size={fs.row + 3} />
+      <LegLine x={20} y={mapH - 6} w={main.w - 40} h={22} view={legView(p.state, g)} size={fs.row + 3} />
+      <PositionLost p={{ ...p, lcd: { ...p.lcd, main: { ...main, h: mapH } } }} w={main.w} />
       <T x={6} y={188} size={fs.label} color="cyan" bold>
         GS
       </T>
@@ -286,6 +298,7 @@ export function MapPage(p: PageProps) {
         ownship={{ lat: a.lat, lon: a.lon, headingTrue: a.headingTrue }}
         {...(pointer && { center: pointer })}
         route={{ plan: p.state.fms.plan, activeLeg: p.state.fms.activeLeg }}
+        {...mapLayers(p)}
         declutter={p.ui.map.declutter}
         symbolScale={p.ui.model === '430' ? 0.55 : 0.68}
         label={pointer ? 'Moving map, panning pointer' : 'Moving map, north up'}
@@ -297,6 +310,7 @@ export function MapPage(p: PageProps) {
       />
       {pointer && <PointerInfo p={p} w={mapW} />}
       {!pointer && <NorthArrow x={4} y={3} size={p.ui.model === '430' ? 15 : 20} />}
+      <PositionLost p={p} w={mapW} />
       <T x={3} y={main.h - fs.small - 4} size={fs.small + 1.5} color="white">
         {r.value}
         <Unit u={r.unit} />
@@ -319,6 +333,39 @@ export function MapPage(p: PageProps) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The map layers of the map pages: the loaded approach (active leg magenta,
+ * missed approach dashed), Class B, C and D airspace, intersections, and the
+ * yellow airplane of dead reckoning when the GPS position is lost.
+ */
+function mapLayers(p: PageProps) {
+  const a = p.state.fms.approach;
+  return {
+    approach: a ? { legs: a.legs, activeIndex: p.derived.approach?.activeLegIndex ?? null } : null,
+    airspace: p.airspace,
+    fixes: true,
+    dr: !p.derived.systems.gpsValid,
+  };
+}
+
+/** "DR" on the left of the map while dead reckoning; "No GPS Position" in the terminal area and on approaches. */
+function PositionLost({ p, w }: { p: PageProps; w: number }) {
+  const fs = FS[p.ui.model];
+  if (p.derived.systems.gpsValid) return null;
+  if (noPosition(p)) {
+    return (
+      <T x={0} y={p.lcd.main.h / 2 - fs.row} w={w} size={fs.row + 1} color="yellow" align="center" bold>
+        No GPS Position
+      </T>
+    );
+  }
+  return (
+    <T x={3} y={p.lcd.main.h / 2 - fs.row / 2} size={fs.row} color="yellow" bold>
+      DR
+    </T>
   );
 }
 

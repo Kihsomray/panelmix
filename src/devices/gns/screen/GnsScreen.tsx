@@ -1,24 +1,28 @@
 import type { JSX } from 'preact';
 import { DeviceScaleContext } from '../../../ui/DeviceFrame';
 import type { Lcd } from '../layout';
+import { annunciations } from '../model/annunciations';
 import { currentPage } from '../model/pages';
+import type { screenMode } from '../model/power';
 import type { PageId } from '../model/types';
 import { AnnunRow } from './AnnunRow';
 import { FreqColumn } from './FreqColumn';
-import { at, type PageProps } from './kit';
+import { at, T, type PageProps } from './kit';
 import { ActiveFplPage, FplCatalogPage } from './pages/FplPages';
 import { DtoPage } from './pages/DtoPage';
-import { NavcomPage, PositionPage, SatellitePage, TerrainPage } from './pages/NavInfoPages';
+import { NavcomPage, PositionPage, SatellitePage } from './pages/NavInfoPages';
 import { DefaultNav430, DefaultNav530, MapPage } from './pages/NavPages';
-import { NrstAirportPage, NrstMissingPage, NrstNavaidPage } from './pages/NrstPages';
+import { NrstAirportPage, NrstIntersectionPage, NrstMissingPage, NrstNavaidPage } from './pages/NrstPages';
 import { AuxPageView, MsgPage, ProcPage, VnavPage } from './pages/OtherPages';
-import { AirportFrequencyPage, AirportLocationPage, AirportProcedurePage, AirportRunwayPage, MissingWaypointPage, NavaidPage } from './pages/WptPages';
+import { TerrainPage } from './pages/TerrainPage';
+import { AirportFrequencyPage, AirportLocationPage, AirportProcedurePage, AirportRunwayPage, IntersectionPage, MissingWaypointPage, NavaidPage } from './pages/WptPages';
 import { PopupLayer } from './Popups';
 
 /*
  * The LCD: frequency column, the page area and the annunciator row, laid out
  * in LCD pixels and scaled onto the glass. Canvases inside get the combined
- * scale so the map stays sharp.
+ * scale so the map stays sharp. Without power the glass is dark; when power
+ * returns the start-up screen shows for a few seconds.
  */
 
 type PageView = (p: PageProps) => JSX.Element;
@@ -35,10 +39,10 @@ const PAGE_VIEWS: Record<PageId, PageView> = {
   'wpt.apt': AirportLocationPage,
   'wpt.rwy': AirportRunwayPage,
   'wpt.freq': AirportFrequencyPage,
-  'wpt.apr': (p) => <AirportProcedurePage {...p} page="wpt.apr" />,
-  'wpt.arvl': (p) => <AirportProcedurePage {...p} page="wpt.arvl" />,
-  'wpt.dep': (p) => <AirportProcedurePage {...p} page="wpt.dep" />,
-  'wpt.int': (p) => <MissingWaypointPage {...p} page="wpt.int" />,
+  'wpt.apr': (p) => <AirportProcedurePage {...p} kind="approach" />,
+  'wpt.arvl': (p) => <AirportProcedurePage {...p} kind="arrival" />,
+  'wpt.dep': (p) => <AirportProcedurePage {...p} kind="departure" />,
+  'wpt.int': IntersectionPage,
   'wpt.usr': (p) => <MissingWaypointPage {...p} page="wpt.usr" />,
   'wpt.vor': (p) => <NavaidPage {...p} kind="vor" />,
   'wpt.ndb': (p) => <NavaidPage {...p} kind="ndb" />,
@@ -49,7 +53,7 @@ const PAGE_VIEWS: Record<PageId, PageView> = {
   'nrst.apt': NrstAirportPage,
   'nrst.vor': (p) => <NrstNavaidPage {...p} kind="vor" />,
   'nrst.ndb': (p) => <NrstNavaidPage {...p} kind="ndb" />,
-  'nrst.int': (p) => <NrstMissingPage {...p} page="nrst.int" />,
+  'nrst.int': NrstIntersectionPage,
   'nrst.usr': (p) => <NrstMissingPage {...p} page="nrst.usr" />,
   'nrst.artcc': (p) => <NrstMissingPage {...p} page="nrst.artcc" />,
   'nrst.fss': (p) => <NrstMissingPage {...p} page="nrst.fss" />,
@@ -64,36 +68,57 @@ const PAGE_VIEWS: Record<PageId, PageView> = {
 /** Pages drawn on black rather than the blue page background. */
 const BLACK: ReadonlySet<PageId> = new Set<PageId>(['nav.map', 'nav.terrain']);
 
+/** The start-up screen: the Garmin name and the unit. */
+function Startup({ lcd, model }: { lcd: Lcd; model: PageProps['ui']['model'] }) {
+  const big = model === '530';
+  const size = big ? 34 : 22;
+  return (
+    <div class="gns-startup" style={at(0, 0, lcd.w, lcd.h)}>
+      <T x={0} y={lcd.h * 0.33} w={lcd.w} size={size} color="white" align="center" bold>
+        GARMIN
+      </T>
+      <T x={0} y={lcd.h * 0.33 + size * 1.35} w={lcd.w} size={size * 0.42} color="cyan" align="center">
+        {big ? 'GNS 530W' : 'GNS 430W'}
+      </T>
+      <T x={0} y={lcd.h * 0.33 + size * 2.05} w={lcd.w} size={size * 0.34} color="white" align="center">
+        Self test in progress
+      </T>
+    </div>
+  );
+}
+
 export function GnsScreen(
   props: Omit<PageProps, 'pixelScale'> & {
     lcd: Lcd;
     deviceScale: number;
     now: number;
     advisory: string | null;
+    mode: ReturnType<typeof screenMode>;
   },
 ) {
-  const { ui, lcd, state, derived, deviceScale, now, advisory } = props;
-  const page = currentPage(ui);
+  const { ui, lcd, state, derived, deviceScale, now, advisory, mode } = props;
+  if (mode === 'off') return <div class="gns-lcd gns-lcd-off" style={{ width: `${lcd.w}px`, height: `${lcd.h}px`, transform: `scale(${lcd.scale})` }} aria-label="Unit off" />;
   const pixelScale = deviceScale * lcd.scale;
+  if (mode === 'startup') {
+    return (
+      <div class={`gns-lcd gns-lcd-${ui.model}`} style={{ width: `${lcd.w}px`, height: `${lcd.h}px`, transform: `scale(${lcd.scale})` }}>
+        <Startup lcd={lcd} model={ui.model} />
+      </div>
+    );
+  }
+  const page = currentPage(ui);
   const pageProps: PageProps = { ...props, pixelScale };
   const black = BLACK.has(page) || (page === 'nav.default' && ui.model === '530');
-  const source = state.nav.cdiSource;
+  const annun = annunciations(ui, state, derived);
   return (
     <div class={`gns-lcd gns-lcd-${ui.model}`} style={{ width: `${lcd.w}px`, height: `${lcd.h}px`, transform: `scale(${lcd.scale})` }}>
       <DeviceScaleContext.Provider value={pixelScale}>
-        <FreqColumn ui={ui} state={state} derived={derived} lcd={lcd} now={now} />
+        <FreqColumn ui={ui} state={state} derived={derived} lcd={lcd} now={now} annun={annun} />
         <div class={`gns-main${black ? ' is-black' : ''}`} style={at(lcd.main.x, lcd.main.y, lcd.main.w, lcd.main.h)} data-page={page}>
           {PAGE_VIEWS[page](pageProps)}
-          {ui.popup && <PopupLayer ui={ui} popup={ui.popup} main={lcd.main} state={state} />}
+          {ui.popup && <PopupLayer ui={ui} popup={ui.popup} main={lcd.main} state={state} procedures={props.procedures} />}
         </div>
-        <AnnunRow
-          ui={ui}
-          lcd={lcd}
-          cdi={source === 'GPS' ? 'GPS' : source === 'NAV1' ? 'VLOC' : ''}
-          obs={state.fms.obsMode}
-          unread={derived.unreadMessages > 0}
-          advisory={advisory}
-        />
+        <AnnunRow ui={ui} lcd={lcd} annun={annun} advisory={advisory} />
       </DeviceScaleContext.Provider>
     </div>
   );

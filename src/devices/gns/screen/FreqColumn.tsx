@@ -1,6 +1,7 @@
 import type { Derived } from '../../../sim/simulator';
 import type { SimState } from '../../../sim/types';
 import type { Lcd } from '../layout';
+import type { Annunciations, BoxAnnun } from '../model/annunciations';
 import { tuningTarget, volumeReadout } from '../model/radios';
 import type { GnsUi, Model } from '../model/types';
 import { at, brg, DataBox, dis, T, Unit } from './kit';
@@ -8,7 +9,8 @@ import { at, brg, DataBox, dis, T, Unit } from './kit';
 /*
  * The left column of the screen: COM and VLOC windows (active white above
  * standby cyan, the tuning cursor in inverse cyan), the 530W's VOR/LOC
- * readout, and the CDI scale annunciation boxes.
+ * readout, and the three annunciator boxes (terrain, CDI scale or approach
+ * service level, integrity).
  */
 
 interface FreqMetrics {
@@ -127,16 +129,28 @@ function VorBox({ w, m, derived }: { w: number; m: FreqMetrics; derived: Derived
   );
 }
 
-export function FreqColumn({ ui, state, derived, lcd, now }: { ui: GnsUi; state: SimState; derived: Derived; lcd: Lcd; now: number }) {
+/** One of the three annunciator boxes under the frequency windows. */
+function AnnunBox({ y, w, h, size, a }: { y: number; w: number; h: number; size: number; a: BoxAnnun | null }) {
+  return (
+    <DataBox x={0} y={y} w={w} h={h}>
+      {a && (
+        <div class={`gns-annun-box is-${a.style}`} style={{ fontSize: `${size}px`, lineHeight: `${h - 2}px` }}>
+          {a.text}
+        </div>
+      )}
+    </DataBox>
+  );
+}
+
+export function FreqColumn({ ui, state, derived, lcd, now, annun }: { ui: GnsUi; state: SimState; derived: Derived; lcd: Lcd; now: number; annun: Annunciations }) {
   const m = METRICS[ui.model];
   const w = lcd.freqW;
   const target = tuningTarget(ui.radio, now);
   const vol = volumeReadout(ui.radio, now);
   const com = state.radios.com[0];
   const nav = state.radios.nav[0];
-  // CDI scale annunciation (ENR / TERM); the trainer has no approaches, so never APR.
-  const scale = derived.gps.scale;
   const boxH = m.annunH;
+  const size = m.label * 1.12;
   return (
     <>
       <Window
@@ -166,13 +180,9 @@ export function FreqColumn({ ui, state, derived, lcd, now }: { ui: GnsUi; state:
         volume={vol?.knob === 'vloc' ? vol.percent : null}
       />
       {m.vor && <VorBox w={w} m={m} derived={derived} />}
-      <DataBox x={0} y={m.annunY} w={w} h={boxH} />
-      <DataBox x={0} y={m.annunY + boxH} w={w} h={boxH}>
-        <T x={0} y={(boxH - m.label * 1.15) / 2} w={w} size={m.label * 1.15} color="green" align="center" bold>
-          {scale}
-        </T>
-      </DataBox>
-      <DataBox x={0} y={m.annunY + boxH * 2} w={w} h={boxH} />
+      <AnnunBox y={m.annunY} w={w} h={boxH} size={size} a={annun.terrain} />
+      <AnnunBox y={m.annunY + boxH} w={w} h={boxH} size={size} a={annun.mode} />
+      <AnnunBox y={m.annunY + boxH * 2} w={w} h={boxH} size={size} a={annun.integ} />
     </>
   );
 }

@@ -1,6 +1,9 @@
 import type { ComponentChildren } from 'preact';
+import type { AirspaceSource } from '../../../core/airspace';
 import type { MagneticModel } from '../../../core/magvar';
 import type { NavDatabase } from '../../../core/navdb';
+import type { ProcedureSource } from '../../../core/procedures';
+import type { TerrainProvider } from '../../../core/terrain';
 import type { Derived } from '../../../sim/simulator';
 import type { SimState } from '../../../sim/types';
 import type { IdentEntry } from '../../../ui/identEntry';
@@ -20,6 +23,9 @@ export interface PageProps {
   readonly db: NavDatabase;
   readonly mag: MagneticModel;
   readonly nearest: NearestLists;
+  readonly procedures: ProcedureSource | null;
+  readonly terrain: TerrainProvider;
+  readonly airspace: AirspaceSource;
   readonly lcd: Lcd;
   /** CSS px per LCD px, for crisp canvases. */
   readonly pixelScale: number;
@@ -87,6 +93,11 @@ const UNIT: Record<UnitName, [string, string]> = {
   fpm: ['f', 'pm'],
   deg: ['°', ''],
 };
+
+/** A magenta waypoint designator after an identifier ("IA", "FA", "MA", "MH"). */
+export function Tag({ t }: { t: string | undefined }) {
+  return t ? <span class="gns-tag">{t}</span> : null;
+}
 
 /** Garmin's small two-line unit glyph after a value. */
 export function Unit({ u }: { u: UnitName }) {

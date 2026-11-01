@@ -8,7 +8,7 @@ import type { PageId } from './types';
  * NRST group (Section 7). With the cursor on, the large knob walks down the
  * list: on an identifier ENT opens its WPT page (with "Done?"), on a
  * frequency ENT loads it into the standby field; D-> picks up the
- * highlighted waypoint.
+ * highlighted waypoint. Intersections come from the CIFP fixes.
  */
 
 /** Nearest airports: two stops per airport, the identifier and the traffic frequency. */
@@ -60,14 +60,28 @@ const nrstNdb: PageLogic = {
   },
 };
 
-/** Pages whose data (intersections, user waypoints, ARTCC, FSS, airspace) the trainer doesn't have. */
+/** Nearest intersections: the identifier opens the INT page. */
+const nrstInt: PageLogic = {
+  stops: (_ui, ctx) => ctx.nearest.fixes.length,
+  list: (ui, ctx) => ({ header: 0, perRow: 1, visible: LIST_ROWS[ui.model].nrstNav, rows: ctx.nearest.fixes.length }),
+  ent: (ui, ctx, stop) => {
+    const f = ctx.nearest.fixes[stop];
+    return f ? step(openWpt(ui, ctx, 'wpt.int', { int: NavDatabase.toWaypoint(f) })) : null;
+  },
+  dto: (_ui, ctx, stop) => {
+    const f = stop === null ? undefined : ctx.nearest.fixes[stop];
+    return f ? { wp: NavDatabase.toWaypoint(f), planIndex: null } : null;
+  },
+};
+
+/** Pages whose data (user waypoints, ARTCC, FSS, airspace) the trainer doesn't have. */
 const empty: PageLogic = { stops: () => 0 };
 
 export const NRST_LOGIC: Partial<Record<PageId, PageLogic>> = {
   'nrst.apt': nrstApt,
   'nrst.vor': nrstVor,
   'nrst.ndb': nrstNdb,
-  'nrst.int': empty,
+  'nrst.int': nrstInt,
   'nrst.usr': empty,
   'nrst.artcc': empty,
   'nrst.fss': empty,

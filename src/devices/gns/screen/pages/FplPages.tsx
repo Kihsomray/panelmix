@@ -1,24 +1,37 @@
-import { planLegs } from '../../../../sim/fms';
+import { approachLegs, planLegs } from '../../../../sim/fms';
 import { entryValue, type IdentEntry } from '../../../../ui/identEntry';
 import { facilityLines, findWaypoint } from '../../model/data';
+import { activeRow, approachHeader, fplRows, legName, ROLE_TAG, type FplRow } from '../../model/fpl';
 import { LIST_ROWS } from '../../model/page';
-import { at, brg, DataBox, dis, EntryText, fit, latLines, T, Title, V, type PageProps } from '../kit';
+import { at, brg, DataBox, dis, EntryText, fit, latLines, T, Tag, Title, V, type PageProps } from '../kit';
 import { WindowFrame } from '../Popups';
 import { WaypointSym } from '../symbols';
 import { FS } from '../parts';
 
 /*
  * FPL key pages: the active flight plan ("flight plan 00") with DTK and DIS
- * per leg and the magenta arrow from the leg's origin to its active
- * waypoint, and the flight plan catalog (the trainer keeps no stored plans).
+ * per leg (CUM too on the 530W), a loaded approach under its own title
+ * ("Approach RNAV 17") with each leg, its designator (IA, FA, MA, MH), holds
+ * with their leg time, and the magenta arrow from the active leg's origin to
+ * its waypoint; and the flight plan catalog (the trainer keeps no stored
+ * plans). With the cursor off the list follows the active leg.
  */
+
+type Row = FplRow | { readonly kind: 'entry' };
+
+const mmss = (min: number) => {
+  const s = Math.round(min * 60);
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+};
 
 export function ActiveFplPage(p: PageProps) {
   const fs = FS[p.ui.model];
   const { main } = p.lcd;
   const big = p.ui.model === '530';
   const fms = p.state.fms;
-  const legs = planLegs(fms, p.state.aircraft, p.mag);
+  const pos = p.state.aircraft;
+  const legs = planLegs(fms, pos, p.mag);
+  const appr = approachLegs(fms, pos, p.mag);
   const visible = LIST_ROWS[p.ui.model].fpl;
   const entry = p.ui.entry?.target.kind === 'fpl' ? p.ui.entry : null;
   const headerY = fs.title + 3;
@@ -29,20 +42,34 @@ export function ActiveFplPage(p: PageProps) {
   const w = main.w - 8;
   const cols = big ? { dtk: 0.52, dis: 0.76, cum: 0.99 } : { dtk: 0.62, dis: 0.96, cum: 0 };
   const first = fms.plan[0]?.ident;
-  const last = fms.plan[fms.plan.length - 1]?.ident;
-  // Rows: the waypoints, plus the blank row where new waypoints are added; while
-  // entering, the new identifier appears in front of the highlighted row.
-  type Row = { kind: 'wp'; index: number } | { kind: 'entry' } | { kind: 'blank' };
-  const rows: Row[] = legs.map((l) => ({ kind: 'wp' as const, index: l.index }));
+  const last = fms.approach?.airport.ident ?? fms.plan[fms.plan.length - 1]?.ident;
+  // Rows: the waypoints, the blank row where new waypoints are added, the approach;
+  // while entering, the new identifier appears in front of the highlighted row.
+  const base = fplRows(fms);
+  const rows: Row[] = [...base];
   if (entry && entry.target.kind === 'fpl') rows.splice(entry.target.index, 0, { kind: 'entry' });
-  rows.push({ kind: 'blank' });
-  const scroll = Math.min(p.ui.scroll, Math.max(rows.length - visible, 0));
-  const shown = rows.slice(scroll, scroll + visible);
+  const shift = (r: number | null) => (r === null ? null : entry && entry.target.kind === 'fpl' && r >= entry.target.index ? r + 1 : r);
   const active = fms.activeLeg;
-  const rowOf = (planIndex: number) => rows.findIndex((r) => r.kind === 'wp' && r.index === planIndex) - scroll;
-  const toRow = active?.planIndex !== null && active?.planIndex !== undefined ? rowOf(active.planIndex) : -99;
-  const fromRow = active && !active.isDirectTo && active.planIndex !== null ? rowOf(active.planIndex - 1) : -99;
+  const toAt = shift(activeRow(fms));
+  // The leg's origin: the waypoint before it, unless flown direct from the present position.
+  let fromAt: number | null = null;
+  if (active && toAt !== null && !active.isDirectTo && active.from.ident !== 'P.POS') {
+    const i = active.approachIndex;
+    if (i !== null && i !== undefined) {
+      let k = i - 1;
+      while (k >= 0 && !fms.approach?.legs[k]?.to) k--;
+      fromAt = k >= 0 ? shift(fms.plan.length + 2 + k) : fms.plan.length > 0 ? shift(fms.plan.length - 1) : null;
+    } else if (active.planIndex !== null && active.planIndex > 0) fromAt = shift(active.planIndex - 1);
+  }
+  const maxScroll = Math.max(rows.length - visible, 0);
+  // With the cursor off the page keeps the active leg in view, its origin (or the row above) on top.
+  const followTop = toAt === null ? 0 : fromAt !== null && toAt - fromAt < visible ? fromAt : toAt - 1;
+  const scroll = p.ui.cursor === null && !entry && toAt !== null ? Math.min(Math.max(followTop, 0), maxScroll) : Math.min(p.ui.scroll, maxScroll);
+  const shown = rows.slice(scroll, scroll + visible);
+  const toRow = toAt === null ? -99 : toAt - scroll;
+  const fromRow = fromAt === null ? -99 : fromAt - scroll;
   const yOf = (r: number) => 2 + r * rowH + (rowH - fs.row) / 2 - 1;
+  const cursorRow = (r: Row) => base.indexOf(r as FplRow);
   return (
     <>
       <Title w={main.w} size={fs.title}>
@@ -55,7 +82,7 @@ export function ActiveFplPage(p: PageProps) {
       </DataBox>
       <DataBox x={fs.row * 1.9 + 5} y={headerY} w={main.w - fs.row * 1.9 - 8} h={fs.row + 5}>
         <T x={4} y={2.5} size={fs.row}>
-          {first ? `${first} / ${last}` : ''}
+          {first ? `${first} / ${last}` : last ? `____ / ${last}` : ''}
         </T>
       </DataBox>
       <T x={6} y={colY} size={fs.label} color="cyan" bold>
@@ -78,8 +105,8 @@ export function ActiveFplPage(p: PageProps) {
           <svg class="gns-svg" style={at(0, 0)} width={12} height={listH} aria-hidden="true">
             <path
               d={
-                fromRow >= 0
-                  ? `M8 ${yOf(fromRow) + fs.row * 0.45}H3V${yOf(toRow) + fs.row * 0.55}H7`
+                fromAt !== null
+                  ? `M8 ${fromRow >= 0 ? yOf(fromRow) + fs.row * 0.45 : 0}H3V${yOf(toRow) + fs.row * 0.55}H7`
                   : `M1 ${yOf(toRow) + fs.row * 0.55}H7`
               }
               fill="none"
@@ -91,55 +118,99 @@ export function ActiveFplPage(p: PageProps) {
         )}
         {shown.map((r, i) => {
           const y = yOf(i);
-          const rowIndex = scroll + i;
-          if (r.kind === 'entry' && entry) {
-            return (
-              <T key="entry" x={12} y={y} size={fs.row}>
-                <EntryText e={entry.e} width={6} />
-              </T>
-            );
+          const sel = !entry && !p.ui.popup && p.ui.cursor !== null && p.ui.cursor === cursorRow(r);
+          switch (r.kind) {
+            case 'entry':
+              return entry ? (
+                <T key="entry" x={12} y={y} size={fs.row}>
+                  <EntryText e={entry.e} width={6} />
+                </T>
+              ) : null;
+            case 'blank':
+              return (
+                <div key="blank">
+                  <T x={12} y={y} size={fs.row} sel={sel}>
+                    ______
+                  </T>
+                  <T x={0} y={y} w={w * cols.dtk} size={fs.row} align="right">
+                    <V v="___" u="mag" />
+                  </T>
+                  <T x={0} y={y} w={w * cols.dis} size={fs.row} align="right">
+                    <V v="__._" u="nm" />
+                  </T>
+                </div>
+              );
+            case 'header':
+              return (
+                <T key="header" x={8} y={y} size={fs.row} color="cyan" sel={sel}>
+                  {approachHeader(fms)}
+                </T>
+              );
+            case 'leg': {
+              const info = appr[r.index];
+              if (!info) return null;
+              const l = info.leg;
+              const hold = l.path === 'HM' || l.path === 'HA' || l.path === 'HF';
+              const distance = info.isActive ? info.cumulativeNm : info.legNm;
+              return (
+                <div key={`leg${r.index}`}>
+                  <T x={12} y={y} size={fs.row} sel={sel}>
+                    {legName(l)}
+                    <Tag t={l.role ? ROLE_TAG[l.role] : undefined} />
+                  </T>
+                  {info.dtkMag !== null && (
+                    <T x={0} y={y} w={w * cols.dtk} size={fs.row} align="right">
+                      <V v={brg(info.dtkMag)} u="mag" />
+                    </T>
+                  )}
+                  {hold && l.legTimeMin !== undefined ? (
+                    <T x={0} y={y} w={w * cols.dis} size={fs.row} align="right">
+                      {mmss(l.legTimeMin)}
+                    </T>
+                  ) : (
+                    distance !== null &&
+                    l.to && (
+                      <T x={0} y={y} w={w * cols.dis} size={fs.row} align="right">
+                        <V v={dis(distance)} u="nm" />
+                      </T>
+                    )
+                  )}
+                  {big && info.cumulativeNm !== null && l.to && !hold && (
+                    <T x={0} y={y} w={w * cols.cum - 2} size={fs.row} align="right">
+                      <V v={dis(info.cumulativeNm)} u="nm" />
+                    </T>
+                  )}
+                </div>
+              );
+            }
+            case 'wp': {
+              const leg = legs[r.index];
+              if (!leg) return null;
+              const dist = leg.isActive ? leg.cumulativeNm : leg.legNm;
+              return (
+                <div key={`wp${r.index}${leg.waypoint.ident}`}>
+                  <T x={12} y={y} size={fs.row} sel={sel}>
+                    {leg.waypoint.ident}
+                  </T>
+                  {leg.dtkMag !== null && (
+                    <T x={0} y={y} w={w * cols.dtk} size={fs.row} align="right">
+                      <V v={brg(leg.dtkMag)} u="mag" />
+                    </T>
+                  )}
+                  {dist !== null && (
+                    <T x={0} y={y} w={w * cols.dis} size={fs.row} align="right">
+                      <V v={dis(dist)} u="nm" />
+                    </T>
+                  )}
+                  {big && leg.cumulativeNm !== null && (
+                    <T x={0} y={y} w={w * cols.cum - 2} size={fs.row} align="right">
+                      <V v={dis(leg.cumulativeNm)} u="nm" />
+                    </T>
+                  )}
+                </div>
+              );
+            }
           }
-          if (r.kind === 'blank') {
-            const sel = !entry && p.ui.cursor === fms.plan.length && !p.ui.popup;
-            return (
-              <div key="blank">
-                <T x={12} y={y} size={fs.row} sel={sel}>
-                  ______
-                </T>
-                <T x={0} y={y} w={w * cols.dtk} size={fs.row} align="right">
-                  <V v="___" u="mag" />
-                </T>
-                <T x={0} y={y} w={w * cols.dis} size={fs.row} align="right">
-                  <V v="__._" u="nm" />
-                </T>
-              </div>
-            );
-          }
-          const leg = legs[r.kind === 'wp' ? r.index : 0]!;
-          const dist = leg.isActive ? leg.cumulativeNm : leg.legNm;
-          const sel = !entry && p.ui.cursor === leg.index && !p.ui.popup;
-          return (
-            <div key={`${leg.waypoint.ident}${rowIndex}`}>
-              <T x={12} y={y} size={fs.row} sel={sel}>
-                {leg.waypoint.ident}
-              </T>
-              {leg.dtkMag !== null && (
-                <T x={0} y={y} w={w * cols.dtk} size={fs.row} align="right">
-                  <V v={brg(leg.dtkMag)} u="mag" />
-                </T>
-              )}
-              {dist !== null && (
-                <T x={0} y={y} w={w * cols.dis} size={fs.row} align="right">
-                  <V v={dis(dist)} u="nm" />
-                </T>
-              )}
-              {big && leg.cumulativeNm !== null && (
-                <T x={0} y={y} w={w * cols.cum - 2} size={fs.row} align="right">
-                  <V v={dis(leg.cumulativeNm)} u="nm" />
-                </T>
-              )}
-            </div>
-          );
         })}
       </DataBox>
       {rows.length > visible && (

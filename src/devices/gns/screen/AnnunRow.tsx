@@ -1,29 +1,18 @@
 import type { Lcd } from '../layout';
+import type { Annunciations } from '../model/annunciations';
 import { pageIndicator } from '../model/pages';
 import type { GnsUi } from '../model/types';
 import { at } from './kit';
 
 /*
  * The bottom row of the screen: the CDI source above the CDI key (GPS green,
- * VLOC white), OBS above the OBS key, a flashing MSG above the MSG key, and
- * on the right the page-group indicator, or a turn advisory in its place.
+ * VLOC white), OBS or SUSP above the OBS key, a flashing MSG above the MSG
+ * key, and on the right the page-group indicator, or a turn advisory in its
+ * place.
  */
 
-export function AnnunRow({
-  ui,
-  lcd,
-  cdi,
-  obs,
-  unread,
-  advisory,
-}: {
-  ui: GnsUi;
-  lcd: Lcd;
-  cdi: 'GPS' | 'VLOC' | '';
-  obs: boolean;
-  unread: boolean;
-  advisory: string | null;
-}) {
+export function AnnunRow({ ui, lcd, annun, advisory }: { ui: GnsUi; lcd: Lcd; annun: Annunciations; advisory: string | null }) {
+  const { cdi, obs, msg: unread } = annun;
   const h = lcd.h - lcd.annunY;
   const size = ui.model === '430' ? 8.6 : 12;
   const y = (h - size) / 2 + 0.5;
@@ -42,7 +31,7 @@ export function AnnunRow({
       )}
       {obs && (
         <div class="gns-t is-bold c-green" style={{ ...at(lcd.annun.obs, y), fontSize: `${size}px` }}>
-          OBS
+          {obs}
         </div>
       )}
       {unread && (

@@ -1,4 +1,5 @@
-import { NavDatabase, type AnyWaypoint } from '../../../core/navdb';
+import { NavDatabase, type AnyWaypoint, type Waypoint } from '../../../core/navdb';
+import type { FmsState } from '../../../sim/types';
 import { startEntry, turnSmall } from '../../../ui/identEntry';
 import { completer, DTO_NEAREST_COUNT } from './data';
 import { item, step, type PageLogic } from './page';
@@ -39,9 +40,10 @@ export const dtoPage: PageLogic = {
       return step({ ...ui, entry: { target: { kind: 'dto' }, e } });
     }
     if (stop === DTO_STOP.fpl) {
-      const plan = ctx.state.fms.plan;
-      if (plan.length === 0) return null;
-      return step({ ...ui, popup: { kind: 'list', purpose: 'dto.fpl', items: plan, index: Math.min(ui.dto.planIndex ?? 0, plan.length - 1) } });
+      const items = fplWaypoints(ctx.state.fms);
+      if (items.length === 0) return null;
+      const at = items.findIndex((w) => w.ident === ui.dto.wp?.ident);
+      return step({ ...ui, popup: { kind: 'list', purpose: 'dto.fpl', items, index: Math.max(ui.dto.planIndex ?? at, 0) } });
     }
     if (stop === DTO_STOP.nrst) {
       const items = ctx.nearest.airports.slice(0, DTO_NEAREST_COUNT).map((a) => NavDatabase.toWaypoint(a));
@@ -57,6 +59,19 @@ export const dtoPage: PageLogic = {
   },
   menu: (_ui, ctx) => [item('Cancel Direct-To NAV?', 'dto.cancel', ctx.state.fms.activeLeg?.isDirectTo === true)],
 };
+
+/**
+ * "Turn the small right knob to display a window showing all waypoints in the
+ * active flight plan": the enroute waypoints, then the loaded approach's fixes
+ * (a direct-to one of them joins the approach there).
+ */
+export function fplWaypoints(fms: FmsState): Waypoint[] {
+  const out: Waypoint[] = [...fms.plan];
+  for (const l of fms.approach?.legs ?? []) {
+    if (l.to && !out.slice(fms.plan.length).some((w) => w.ident === l.to!.ident)) out.push(l.to);
+  }
+  return out;
+}
 
 /** ENT after spelling an identifier: the page shows it and "Activate?" is highlighted. */
 export function acceptDto(ui: GnsUi, ctx: GnsCtx, wp: AnyWaypoint): Step {

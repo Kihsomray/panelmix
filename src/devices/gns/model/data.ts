@@ -1,7 +1,8 @@
 import { bearing, distanceNm, type LatLon } from '../../../core/geo';
 import type { MagneticModel } from '../../../core/magvar';
-import type { Airport, AirportFrequency, AnyWaypoint, FrequencyType, Navaid, NavDatabase, Runway, Waypoint, WaypointKind } from '../../../core/navdb';
+import type { Airport, AirportFrequency, AnyWaypoint, Fix, FrequencyType, Navaid, NavDatabase, Runway, Waypoint, WaypointKind } from '../../../core/navdb';
 import { NavDatabase as Db } from '../../../core/navdb';
+import type { AirportProcedures, ApproachType, ProcedureSource } from '../../../core/procedures';
 import type { FmsState } from '../../../sim/types';
 import type { GnsCtx, NearestCriteria, NearestLists, WptKind } from './types';
 
@@ -26,7 +27,55 @@ export function nearestLists(db: NavDatabase, pos: LatLon, criteria: NearestCrit
       .map((r) => r.item),
     vors: db.nearestNavaids(pos, NEAREST_COUNT, 'vor', NEAREST_RANGE_NM).map((r) => r.item),
     ndbs: db.nearestNavaids(pos, NEAREST_COUNT, 'ndb', NEAREST_RANGE_NM).map((r) => r.item),
+    fixes: nearestFixes(db, pos, NEAREST_COUNT, NEAREST_RANGE_NM),
   };
+}
+
+// Intersections --------------------------------------------------------------
+
+/** Grid of the database's intersections in 1 degree cells, built once per database. */
+const fixGrids = new WeakMap<NavDatabase, Map<string, Fix[]>>();
+
+function fixGrid(db: NavDatabase): Map<string, Fix[]> {
+  let grid = fixGrids.get(db);
+  if (!grid) {
+    grid = new Map();
+    for (const f of db.fixes) {
+      const key = `${Math.floor(f.lat)}:${Math.floor(f.lon)}`;
+      const cell = grid.get(key);
+      if (cell) cell.push(f);
+      else grid.set(key, [f]);
+    }
+    fixGrids.set(db, grid);
+  }
+  return grid;
+}
+
+/**
+ * The nearest intersections (the database has no nearest-fix query): rings
+ * of 1 degree cells around the airplane until `count` are certain.
+ */
+export function nearestFixes(db: NavDatabase, pos: LatLon, count: number, maxNm: number): Fix[] {
+  const grid = fixGrid(db);
+  const found: { f: Fix; d: number }[] = [];
+  const cy = Math.floor(pos.lat);
+  const cx = Math.floor(pos.lon);
+  for (let ring = 0; ring < 6; ring++) {
+    for (let y = cy - ring; y <= cy + ring; y++) {
+      for (let x = cx - ring; x <= cx + ring; x++) {
+        if (Math.max(Math.abs(y - cy), Math.abs(x - cx)) !== ring) continue;
+        for (const f of grid.get(`${y}:${x}`) ?? []) {
+          const d = distanceNm(pos, f);
+          if (d <= maxNm) found.push({ f, d });
+        }
+      }
+    }
+    // Everything within `ring` cells (at least 40 nm per ring at these latitudes) has been seen.
+    const covered = ring * 60 * Math.cos((Math.min(Math.abs(pos.lat) + ring, 89) * Math.PI) / 180);
+    found.sort((a, b) => a.d - b.d);
+    if (found.length >= count && found[count - 1]!.d <= covered) break;
+  }
+  return found.slice(0, count).map((x) => x.f);
 }
 
 /** Memo key for the nearest lists: about a mile of movement, or a criteria change. */
@@ -100,7 +149,7 @@ export function vorClass(n: Navaid): string {
   return n.power === 'HIGH' ? 'High Alt.' : n.power === 'LOW' ? 'Terminal' : 'Low Alt.';
 }
 
-const KIND_OF: Record<WptKind, WaypointKind | null> = { airport: 'airport', vor: 'vor', ndb: 'ndb', int: null, usr: 'user' };
+const KIND_OF: Record<WptKind, WaypointKind | null> = { airport: 'airport', vor: 'vor', ndb: 'ndb', int: 'fix', usr: 'user' };
 
 /**
  * Spell-ahead completion. With a kind (WPT pages) only that kind of waypoint
@@ -115,8 +164,6 @@ export function completer(db: NavDatabase, kind: WptKind | null): (prefix: strin
 /** The waypoint an identifier names: the nearest one when several share it. */
 export function findWaypoint(db: NavDatabase, ident: string, kind: WptKind | null, near: LatLon): AnyWaypoint | undefined {
   const wanted = kind === null ? null : KIND_OF[kind];
-  // Intersections are not in the trainer database.
-  if (kind !== null && wanted === null) return undefined;
   const all = db.find(ident).filter((w) => wanted === null || w.kind === wanted);
   if (all.length <= 1) return all[0];
   return all.reduce((best, w) => (distanceNm(near, w) < distanceNm(near, best) ? w : best));
@@ -124,6 +171,16 @@ export function findWaypoint(db: NavDatabase, ident: string, kind: WptKind | nul
 
 export const isAirportRecord = (w: AnyWaypoint): w is Airport => w.kind === 'airport' && 'runways' in w;
 export const isNavaidRecord = (w: AnyWaypoint): w is Navaid => (w.kind === 'vor' || w.kind === 'ndb') && 'freqKhz' in w;
+export const isFixRecord = (w: AnyWaypoint): w is Fix => w.kind === 'fix' && 'region' in w;
+
+/** The intersection record for a plan waypoint of kind fix. */
+export function fixOf(db: NavDatabase, wp: Waypoint | null): Fix | undefined {
+  if (!wp || wp.kind !== 'fix') return undefined;
+  return db.find(wp.ident).find((w): w is Fix => isFixRecord(w) && distanceNm(w, wp) < 0.5);
+}
+
+/** The region line of the INT page: enroute, or the airport a terminal waypoint belongs to. */
+export const fixRegion = (f: Fix) => (f.region === 'ENRT' ? 'ENROUTE' : `${f.region} TERMINAL`);
 
 export function airportOf(db: NavDatabase, wp: Waypoint | null): Airport | undefined {
   return wp && wp.kind === 'airport' ? db.airport(wp.ident) : undefined;
@@ -138,17 +195,17 @@ const activeTo = (fms: FmsState) => fms.activeLeg?.to ?? null;
 
 /**
  * What the WPT pages show until the pilot picks something: the active
- * waypoint when it is of the right kind, then the flight plan destination
- * (airports), then the nearest one.
+ * waypoint when it is of the right kind, then the destination (the loaded
+ * approach's airport, or the flight plan's last airport), then the nearest one.
  */
-export function defaultWaypoint(ctx: Pick<GnsCtx, 'state' | 'nearest'>, kind: 'airport' | 'vor' | 'ndb'): Waypoint | null {
+export function defaultWaypoint(ctx: Pick<GnsCtx, 'state' | 'nearest'>, kind: 'airport' | 'vor' | 'ndb' | 'fix'): Waypoint | null {
   const to = activeTo(ctx.state.fms);
   if (to?.kind === kind) return to;
   if (kind === 'airport') {
-    const dest = [...ctx.state.fms.plan].reverse().find((w) => w.kind === 'airport');
+    const dest = ctx.state.fms.approach?.airport ?? [...ctx.state.fms.plan].reverse().find((w) => w.kind === 'airport');
     if (dest) return dest;
   }
-  const list = kind === 'airport' ? ctx.nearest.airports : kind === 'vor' ? ctx.nearest.vors : ctx.nearest.ndbs;
+  const list = kind === 'airport' ? ctx.nearest.airports : kind === 'vor' ? ctx.nearest.vors : kind === 'ndb' ? ctx.nearest.ndbs : ctx.nearest.fixes;
   const first = list[0];
   return first ? Db.toWaypoint(first) : null;
 }
@@ -189,10 +246,48 @@ export function waypointAt(db: NavDatabase, pos: LatLon, toleranceNm: number): A
 /** City and state line for an airport ("HAGERSTOWN MD"). */
 export const cityLine = (a: Airport) => [a.city, a.state].filter(Boolean).join(' ').toUpperCase();
 
-/** The facility and city lines of the identifier windows (VORs and NDBs show their type). */
+/** The facility and city lines of the identifier windows (VORs and NDBs show their type, intersections their region). */
 export function facilityLines(w: AnyWaypoint | undefined): { name: string; city: string } {
   if (!w) return { name: '', city: '' };
   if (isAirportRecord(w)) return { name: w.name.toUpperCase(), city: cityLine(w) };
   if (isNavaidRecord(w)) return { name: w.name.toUpperCase(), city: w.type };
+  if (isFixRecord(w)) return { name: 'INTERSECTION', city: fixRegion(w) };
   return { name: w.name.toUpperCase(), city: '' };
 }
+
+/** What the nearest airport page's APR column shows, in the unit's three letters. */
+const APR_ABBREVIATION: Partial<Record<ApproachType, string>> = {
+  ILS: 'ILS',
+  GLS: 'GLS',
+  IGS: 'ILS',
+  RNAV: 'RNA',
+  RNP: 'RNA',
+  GPS: 'GPS',
+  LOC: 'LOC',
+  'LOC BC': 'LOC',
+  LDA: 'LDA',
+  SDF: 'SDF',
+  VOR: 'VOR',
+  'VOR/DME': 'VOR',
+  TACAN: 'TAC',
+  NDB: 'NDB',
+  'NDB/DME': 'NDB',
+};
+
+/** Precision first, then GPS, then the ground-based non-precision approaches. */
+const APR_RANK: readonly ApproachType[] = ['ILS', 'GLS', 'IGS', 'RNAV', 'RNP', 'GPS', 'LOC', 'LOC BC', 'LDA', 'SDF', 'VOR', 'VOR/DME', 'TACAN', 'NDB', 'NDB/DME'];
+
+/**
+ * The best approach an airport has ("ILS", "RNA", "VFR" when it has none),
+ * or null while its procedure file is still loading.
+ */
+export function bestApproach(procedures: ProcedureSource | null, ident: string): string | null {
+  if (!procedures || !procedures.has(ident)) return 'VFR';
+  const p: AirportProcedures | null | undefined = procedures.get(ident);
+  if (p === undefined) return null;
+  const flown = p ? p.approaches.filter((a) => a.type !== 'RNP' && a.type !== 'GLS') : [];
+  if (flown.length === 0) return 'VFR';
+  const best = [...flown].sort((a, b) => APR_RANK.indexOf(a.type) - APR_RANK.indexOf(b.type))[0]!;
+  return APR_ABBREVIATION[best.type] ?? best.type.slice(0, 3);
+}
+

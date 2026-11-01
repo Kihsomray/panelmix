@@ -5,31 +5,10 @@ import { FS } from '../parts';
 import { AirportSym } from '../symbols';
 
 /*
- * The NAV group's information pages: Terrain (no terrain data in the
- * trainer), NAVCOM (frequencies of the flight plan airports, ENT loads one),
- * Position (430W) and Satellite Status.
+ * The NAV group's information pages: NAVCOM (frequencies of the flight plan
+ * airports, ENT loads one), Position (430W) and Satellite Status. The
+ * TERRAIN page is in TerrainPage.tsx.
  */
-
-export function TerrainPage(p: PageProps) {
-  const fs = FS[p.ui.model];
-  const { main } = p.lcd;
-  const w = main.w * 0.8;
-  return (
-    <>
-      <T x={3} y={2} size={fs.label} color="cyan" bold>
-        TERRAIN
-      </T>
-      <DataBox x={(main.w - w) / 2} y={main.h / 2 - fs.row * 1.6} w={w} h={fs.row * 3.2}>
-        <T x={0} y={fs.row * 0.45} w={w} size={fs.row} color="yellow" align="center" bold>
-          TERRAIN NOT AVAILABLE
-        </T>
-        <T x={0} y={fs.row * 1.8} w={w} size={fs.label} color="cyan" align="center">
-          Terrain data is not in the trainer database
-        </T>
-      </DataBox>
-    </>
-  );
-}
 
 export function NavcomPage(p: PageProps) {
   const fs = FS[p.ui.model];
