@@ -77,7 +77,11 @@ export function App() {
     let alive = true;
     setState({ status: 'loading' });
     boot()
-      .then((sim) => alive && setState({ status: 'ready', sim }))
+      .then((sim) => {
+        // Development builds expose the simulator for end-to-end tests (dispatch commands, read state).
+        if (import.meta.env.DEV) (globalThis as { __panelmix?: Simulator }).__panelmix = sim;
+        if (alive) setState({ status: 'ready', sim });
+      })
       .catch((err: unknown) => alive && setState({ status: 'error', message: err instanceof Error ? err.message : String(err) }));
     return () => {
       alive = false;
