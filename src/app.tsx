@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { MagneticModel, type MagvarGrid } from './core/magvar';
-import { NavDatabase, type RawNavdata } from './core/navdb';
+import { createAirspaceSource, type RawAirspace } from './core/airspaceSource';
+import { NavDatabase, type RawAirway, type RawFix, type RawLocalizer, type RawNavdata } from './core/navdb';
+import { createProcedureSource } from './core/procdb';
+import { createTerrainService } from './core/terrainService';
 import type { DeviceSpec, Slot } from './devices/types';
 import { SimContext } from './sim/hooks';
 import { loadSimState, saveSimState } from './sim/persist';
@@ -23,19 +26,44 @@ const SAVE_EVERY_MS = 3000;
 
 type Boot = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; sim: Simulator };
 
+async function fetchJson<T>(url: string, required: boolean): Promise<T | null> {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) {
+      if (required) throw new Error(`${url.split('/').pop()} ${r.status}`);
+      return null;
+    }
+    return (await r.json()) as T;
+  } catch (err) {
+    if (required) throw err;
+    return null;
+  }
+}
+
 async function boot(): Promise<Simulator> {
   const base = import.meta.env.BASE_URL;
-  const [nav, mag] = await Promise.all([
-    fetch(`${base}data/navdata.json`).then((r) => {
-      if (!r.ok) throw new Error(`navdata ${r.status}`);
-      return r.json() as Promise<RawNavdata>;
-    }),
-    fetch(`${base}data/magvar.json`).then((r) => {
-      if (!r.ok) throw new Error(`magvar ${r.status}`);
-      return r.json() as Promise<MagvarGrid>;
-    }),
+  const data = `${base}data/`;
+  // The navigation database and magnetic model are required; CIFP fixes,
+  // localizers, airways, airspace and procedures enrich it when present.
+  const [nav, mag, fixes, localizers, airways, airspace, procedures] = await Promise.all([
+    fetchJson<RawNavdata>(`${data}navdata.json`, true),
+    fetchJson<MagvarGrid>(`${data}magvar.json`, true),
+    fetchJson<{ fixes: RawFix[] }>(`${data}fixes.json`, false),
+    fetchJson<{ items: RawLocalizer[] }>(`${data}localizers.json`, false),
+    fetchJson<{ items: RawAirway[] }>(`${data}airways.json`, false),
+    fetchJson<RawAirspace>(`${data}airspace.json`, false),
+    createProcedureSource(base),
   ]);
-  return new Simulator(new NavDatabase(nav), new MagneticModel(mag), loadSimState());
+  const db = new NavDatabase(nav!, {
+    ...(fixes && { fixes: fixes.fixes }),
+    ...(localizers && { localizers: localizers.items }),
+    ...(airways && { airways: airways.items }),
+  });
+  return new Simulator(db, new MagneticModel(mag!), loadSimState(), {
+    terrain: createTerrainService(base),
+    airspace: createAirspaceSource(airspace),
+    procedures,
+  });
 }
 
 export function App() {

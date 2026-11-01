@@ -1,6 +1,7 @@
 import type { Waypoint } from '../core/navdb';
 import { EMPTY_FMS } from './fms';
 import { pitchForVerticalSpeed } from './flight';
+import { initialSystemsState } from './systems';
 import type { SimState } from './types';
 
 /*
@@ -87,11 +88,14 @@ export function initialSimState(): SimState {
       altitudeArmed: false,
       lateralArmed: null,
       gpss: false,
+      verticalArmed: null,
+      approach: false,
       pitchRefDeg: cruisePitch,
       altitudeRefFt: START.altitudeFt,
       rollRefDeg: 0,
     },
     controls: { roll: 0, pitch: 0 },
     messages: [],
+    systems: initialSystemsState(),
   };
 }

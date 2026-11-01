@@ -1,7 +1,10 @@
 import { createContext } from 'preact';
 import { useContext, useEffect, useRef, useState } from 'preact/hooks';
+import type { AirspaceSource } from '../core/airspace';
 import type { MagneticModel } from '../core/magvar';
 import type { NavDatabase } from '../core/navdb';
+import type { ProcedureSource } from '../core/procedures';
+import type { TerrainProvider } from '../core/terrain';
 import type { SimCommand } from './commands';
 import type { Derived, Simulator } from './simulator';
 import type { SimState } from './types';
@@ -27,6 +30,10 @@ export interface SimHandle {
   readonly dispatch: (cmd: SimCommand) => void;
   readonly db: NavDatabase;
   readonly mag: MagneticModel;
+  readonly terrain: TerrainProvider;
+  readonly airspace: AirspaceSource;
+  /** Instrument procedures by airport; null when the procedure database isn't available. */
+  readonly procedures: ProcedureSource | null;
 }
 
 /** The whole live state. The component re-renders on every simulation frame. */
@@ -34,7 +41,16 @@ export function useSim(): SimHandle {
   const sim = useSimulator();
   const [, setTick] = useState(0);
   useEffect(() => sim.subscribe(() => setTick((t) => t + 1)), [sim]);
-  return { state: sim.getState(), derived: sim.getDerived(), dispatch: sim.dispatch, db: sim.db, mag: sim.mag };
+  return {
+    state: sim.getState(),
+    derived: sim.getDerived(),
+    dispatch: sim.dispatch,
+    db: sim.db,
+    mag: sim.mag,
+    terrain: sim.terrain,
+    airspace: sim.airspace,
+    procedures: sim.procedures,
+  };
 }
 
 /**

@@ -1,4 +1,10 @@
-import type { Waypoint } from '../core/navdb';
+import type { FmsState } from './fms/types';
+import type { SystemsState } from './systems/types';
+
+export type * from './fms/types';
+export type * from './systems/types';
+export { FMS_NULLABLE } from './fms/types';
+export { SYSTEMS_NULLABLE } from './systems/types';
 
 /*
  * The one shared state every device reads. Devices never own navigation or
@@ -104,27 +110,9 @@ export interface NavSelectionState {
   readonly bearing2: BearingSource;
 }
 
-export interface ActiveLeg {
-  /** Where the leg starts: a waypoint, or the present position for a direct-to. */
-  readonly from: Waypoint;
-  readonly to: Waypoint;
-  /** Index of `to` in the flight plan, or null for a direct-to off the plan. */
-  readonly planIndex: number | null;
-  readonly isDirectTo: boolean;
-}
-
-export interface FmsState {
-  readonly plan: readonly Waypoint[];
-  readonly activeLeg: ActiveLeg | null;
-  /** OBS mode: sequencing suspended, course set by the OBS / CRS knob. */
-  readonly obsMode: boolean;
-  readonly obsCourseMag: number;
-  /** Time the plan or leg last changed; devices use it to reset their cursors. */
-  readonly revision: number;
-}
-
 export type LateralMode = 'ROL' | 'HDG' | 'NAV';
-export type VerticalMode = 'PIT' | 'ALT' | 'VS' | 'IAS';
+/** GS tracks the active vertical path: ILS glideslope or GPS glidepath (GP). */
+export type VerticalMode = 'PIT' | 'ALT' | 'VS' | 'IAS' | 'GS';
 
 export interface AutopilotState {
   readonly engaged: boolean;
@@ -141,6 +129,10 @@ export interface AutopilotState {
   readonly lateralArmed: 'NAV' | null;
   /** GPS steering: in HDG mode the autopilot follows the GPS course instead of the bug. */
   readonly gpss: boolean;
+  /** Glideslope / glidepath armed: captures the vertical path from below or level. */
+  readonly verticalArmed: 'GS' | null;
+  /** NAV was selected through APR: approach lateral mode, annunciated as LOC/GPS/VAPP by units. */
+  readonly approach: boolean;
   /** Pitch held in PIT mode. */
   readonly pitchRefDeg: number;
   /** Altitude held in ALT mode. */
@@ -182,6 +174,8 @@ export interface SimState {
   readonly nav: NavSelectionState;
   readonly fms: FmsState;
   readonly ap: AutopilotState;
+  /** Failures, electrical, winds aloft and turbulence. */
+  readonly systems: SystemsState;
   readonly controls: PilotControls;
   readonly messages: readonly SimMessage[];
 }

@@ -7,7 +7,8 @@ import { bearing, distanceNm, radioHorizonNm, type LatLon } from './geo';
  * nearest lists and tuning a navaid by frequency.
  */
 
-export type WaypointKind = 'airport' | 'vor' | 'ndb' | 'user';
+/** `fix`: an RNAV waypoint or intersection from the CIFP (enroute or terminal). */
+export type WaypointKind = 'airport' | 'vor' | 'ndb' | 'fix' | 'user';
 
 /**
  * A waypoint as stored in flight plans and passed between devices: plain,
@@ -80,7 +81,45 @@ export interface Navaid extends Waypoint {
   readonly power: string;
 }
 
-export type AnyWaypoint = Airport | Navaid | Waypoint;
+export interface Fix extends Waypoint {
+  readonly kind: 'fix';
+  /** "ENRT" for enroute waypoints, or the airport a terminal waypoint belongs to ("KJYO"). */
+  readonly region: string;
+}
+
+/** A localizer (with its glideslope when it is an ILS), from the CIFP. */
+export interface Localizer {
+  readonly ident: string;
+  readonly airport: string;
+  readonly runway: string;
+  readonly freqKhz: number;
+  /** Localizer antenna. */
+  readonly lat: number;
+  readonly lon: number;
+  /** Front course, degrees magnetic. */
+  readonly courseMag: number;
+  /** Full course width, degrees (typically 3 to 6). */
+  readonly widthDeg: number;
+  readonly glideslope: {
+    readonly lat: number;
+    readonly lon: number;
+    readonly angleDeg: number;
+    readonly elevationFt: number;
+  } | null;
+  readonly threshold: { readonly lat: number; readonly lon: number; readonly elevationFt: number; readonly tchFt: number } | null;
+  /** Station declination used for the course, east positive. */
+  readonly magVar: number;
+}
+
+export interface Airway {
+  /** "V143", "T289", "J6", "Q80" */
+  readonly name: string;
+  /** L low, H high, B both. */
+  readonly level: 'L' | 'H' | 'B';
+  readonly fixes: readonly { readonly ident: string; readonly lat: number; readonly lon: number }[];
+}
+
+export type AnyWaypoint = Airport | Navaid | Fix | Waypoint;
 
 export interface NearestResult<T> {
   readonly item: T;
@@ -97,6 +136,24 @@ export interface NearestAirportFilter {
 type RawRunway = [string, string, number, number, 0 | 1 | 2, 0 | 1, number | null, number | null, number | null, number | null, number | null];
 type RawAirport = [string, string, string, string, number, number, number, 0 | 1 | 2, number, RawRunway[], [FrequencyType, number, string][]];
 type RawNavaid = [string, string, NavaidType, number, number, number, number, number, string];
+/** [ident, lat, lon, region] */
+export type RawFix = [string, number, number, string];
+/** [ident, airport, runway, freqKhz, lat, lon, courseMag, widthDeg, gsLat, gsLon, gsAngle, gsElevFt, thrLat, thrLon, thrElevFt, tchFt, magVar] */
+export type RawLocalizer = [
+  string, string, string, number, number, number, number, number,
+  number | null, number | null, number | null, number | null,
+  number | null, number | null, number | null, number | null, number,
+];
+/** [name, level, [[ident, lat, lon], ...]] */
+export type RawAirway = [string, 'L' | 'H' | 'B', [string, number, number][]];
+
+/** Optional CIFP-derived data (public/data/fixes.json, localizers.json, airways.json). */
+export interface RawNavExtras {
+  readonly fixes?: readonly RawFix[];
+  readonly localizers?: readonly RawLocalizer[];
+  readonly airways?: readonly RawAirway[];
+}
+
 export interface RawNavdata {
   readonly v: 1;
   readonly built: string;
@@ -136,6 +193,25 @@ function decodeAirport(r: RawAirport): Airport {
   };
 }
 
+function decodeLocalizer(r: RawLocalizer): Localizer {
+  const [ident, airport, runway, freqKhz, lat, lon, courseMag, widthDeg, gsLat, gsLon, gsAngle, gsElev, thrLat, thrLon, thrElev, tch, magVar] = r;
+  return {
+    ident,
+    airport,
+    runway,
+    freqKhz,
+    lat,
+    lon,
+    courseMag,
+    widthDeg,
+    glideslope:
+      gsLat !== null && gsLon !== null && gsAngle !== null ? { lat: gsLat, lon: gsLon, angleDeg: gsAngle, elevationFt: gsElev ?? 0 } : null,
+    threshold:
+      thrLat !== null && thrLon !== null ? { lat: thrLat, lon: thrLon, elevationFt: thrElev ?? 0, tchFt: tch ?? 50 } : null,
+    magVar,
+  };
+}
+
 function decodeNavaid(r: RawNavaid): Navaid {
   const [ident, name, type, freqKhz, lat, lon, elev, magVar, power] = r;
   const isNdb = type.startsWith('NDB');
@@ -157,7 +233,7 @@ function decodeNavaid(r: RawNavaid): Navaid {
 /** Service range by class, nm. Line of sight limits it further at low altitude. */
 const SERVICE_RANGE_NM: Record<string, number> = { HIGH: 130, MEDIUM: 40, LOW: 25 };
 
-const KIND_ORDER: Record<WaypointKind, number> = { airport: 0, vor: 1, ndb: 2, user: 3 };
+const KIND_ORDER: Record<WaypointKind, number> = { airport: 0, vor: 1, ndb: 2, fix: 3, user: 4 };
 const CELL_DEG = 1;
 
 export class NavDatabase {
@@ -169,11 +245,36 @@ export class NavDatabase {
   private readonly navaidsByFreq = new Map<number, Navaid[]>();
   private readonly grid = new Map<string, { airports: Airport[]; navaids: Navaid[] }>();
 
-  constructor(raw: RawNavdata) {
+  readonly fixes: readonly Fix[];
+  readonly localizers: readonly Localizer[];
+  readonly airways: readonly Airway[];
+  private readonly localizersByFreq = new Map<number, Localizer[]>();
+  private readonly airwaysByFix = new Map<string, Airway[]>();
+
+  constructor(raw: RawNavdata, extras: RawNavExtras = {}) {
     this.built = raw.built;
     this.airports = raw.airports.map(decodeAirport);
     this.navaids = raw.navaids.map(decodeNavaid);
-    this.byIdent = [...this.airports, ...this.navaids].sort(
+    this.fixes = (extras.fixes ?? []).map(([ident, lat, lon, region]) => ({ kind: 'fix', ident, name: ident, lat, lon, region }));
+    this.localizers = (extras.localizers ?? []).map(decodeLocalizer);
+    this.airways = (extras.airways ?? []).map(([name, level, fixes]) => ({
+      name,
+      level,
+      fixes: fixes.map(([ident, lat, lon]) => ({ ident, lat, lon })),
+    }));
+    for (const l of this.localizers) {
+      const list = this.localizersByFreq.get(l.freqKhz) ?? [];
+      list.push(l);
+      this.localizersByFreq.set(l.freqKhz, list);
+    }
+    for (const w of this.airways) {
+      for (const f of w.fixes) {
+        const list = this.airwaysByFix.get(f.ident) ?? [];
+        list.push(w);
+        this.airwaysByFix.set(f.ident, list);
+      }
+    }
+    this.byIdent = [...this.airports, ...this.navaids, ...this.fixes].sort(
       (a, b) => (a.ident < b.ident ? -1 : a.ident > b.ident ? 1 : KIND_ORDER[a.kind] - KIND_ORDER[b.kind]),
     );
     for (const n of this.navaids) {
@@ -361,6 +462,40 @@ export class NavDatabase {
       }
     }
     return best;
+  }
+
+  /**
+   * The localizer a receiver tuned to `khz` would capture: the closest one on
+   * that frequency within 25 nm (localizer service volume, simplified).
+   */
+  tuneLocalizer(khz: number, pos: LatLon): Localizer | null {
+    const candidates = this.localizersByFreq.get(khz);
+    if (!candidates) return null;
+    let best: Localizer | null = null;
+    let bestD = 25;
+    for (const l of candidates) {
+      const d = distanceNm(pos, l);
+      if (d <= bestD) {
+        best = l;
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  localizer(ident: string): Localizer | undefined {
+    const key = ident.trim().toUpperCase();
+    return this.localizers.find((l) => l.ident === key);
+  }
+
+  airway(name: string): Airway | undefined {
+    const key = name.trim().toUpperCase();
+    return this.airways.find((w) => w.name === key);
+  }
+
+  /** Airways that pass through a fix or navaid. */
+  airwaysAt(ident: string): readonly Airway[] {
+    return this.airwaysByFix.get(ident.trim().toUpperCase()) ?? [];
   }
 
   /** Strips a database record down to the serialisable waypoint stored in plans. */

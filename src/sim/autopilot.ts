@@ -98,6 +98,9 @@ function verticalCommand(ap: AutopilotState, input: GuidanceInput): number {
       const ps = excessPowerFpm(state.bugs.airspeedKt, a.engine.throttle, sigma);
       return clamp(ps + 150 * (a.iasKt - state.bugs.airspeedKt), -2000, AP_MAX_VS);
     }
+    case 'GS':
+      // Vertical path tracking arrives with the procedure-capable FMS; hold the current rate until then.
+      return a.verticalSpeedFpm;
   }
 }
 

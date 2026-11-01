@@ -2,8 +2,10 @@ import { COM, NAV, snap } from '../core/frequency';
 import { norm360 } from '../core/geo';
 import type { MagneticModel } from '../core/magvar';
 import type { Waypoint } from '../core/navdb';
+import type { Approach } from '../core/procedures';
 import { pitchForVerticalSpeed } from './flight';
 import * as fms from './fms';
+import { applySystemsCommand, isSystemsCommand, type SystemsCommand } from './systems/commands';
 import type {
   AutopilotState,
   BearingSource,
@@ -49,7 +51,8 @@ export type SimCommand =
   /** Sets the selected course of whatever drives the CDI: a NAV OBS, or the GPS OBS course in OBS mode. */
   | { type: 'course.set'; mag: number }
   | { type: 'bearing.set'; pointer: 1 | 2; source: BearingSource }
-  | { type: 'fms.directTo'; waypoint: Waypoint; planIndex?: number | null }
+  /** Direct-to a waypoint; with `courseMag`, a course to it (D-> CRS) instead of from the present position. */
+  | { type: 'fms.directTo'; waypoint: Waypoint; planIndex?: number | null; courseMag?: number }
   | { type: 'fms.cancelDirectTo' }
   | { type: 'fms.activateLeg'; index: number }
   | { type: 'fms.insert'; index: number; waypoint: Waypoint }
@@ -58,6 +61,24 @@ export type SimCommand =
   | { type: 'fms.invert' }
   | { type: 'fms.clear' }
   | { type: 'fms.obs'; on: boolean }
+  /**
+   * Loads an instrument approach after the enroute plan. `activate`: just load it, activate it
+   * (fly the transition from its first fix), or activate vectors to final.
+   */
+  | {
+      type: 'fms.loadApproach';
+      airport: Waypoint;
+      approach: Approach;
+      transition: string | null;
+      activate: 'load' | 'activate' | 'vtf';
+    }
+  | { type: 'fms.activateApproach'; vectorsToFinal: boolean }
+  | { type: 'fms.removeApproach' }
+  /** Resumes automatic sequencing after SUSP (missed approach, or out of a hold). */
+  | { type: 'fms.unsuspend' }
+  /** Pilot-entered hold at a waypoint. */
+  | { type: 'fms.hold'; waypoint: Waypoint; inboundCourseMag: number; turn: 'L' | 'R'; legTimeMin: number | null; legNm: number | null }
+  | { type: 'fms.exitHold' }
   /** Sets the GPS OBS course directly, whatever the CDI source (GTN OBS page, G1000 OBS softkey). */
   | { type: 'fms.obsCourse'; mag: number }
   | { type: 'ap.engage'; on: boolean }
@@ -72,6 +93,10 @@ export type SimCommand =
   | { type: 'ap.armAltitude'; on: boolean }
   /** Level mode (GFC 500 LVL, also the KAP 140 / GFC "blue button" recovery): wings level, zero vertical speed. */
   | { type: 'ap.level' }
+  /** Arms (or disarms) glideslope / glidepath capture. */
+  | { type: 'ap.armGlidepath'; on: boolean }
+  /** APR: approach lateral mode (NAV with approach annunciation) and glidepath arm when a vertical path exists. */
+  | { type: 'ap.approach'; on: boolean }
   /** Nose up (+1) / down (-1) wheel: changes the reference of the active vertical mode. */
   | { type: 'ap.nudge'; direction: 1 | -1 }
   | { type: 'controls.set'; roll: number; pitch: number }
@@ -90,7 +115,8 @@ export type SimCommand =
   | { type: 'sim.wind'; fromTrue: number; kt: number }
   | { type: 'sim.qnh'; inHg: number }
   | { type: 'msg.post'; text: string; level?: MessageLevel }
-  | { type: 'msg.readAll' };
+  | { type: 'msg.readAll' }
+  | SystemsCommand;
 
 export interface CommandContext {
   readonly mag: MagneticModel;
@@ -136,6 +162,7 @@ function engageDefaults(state: SimState): AutopilotState {
 }
 
 export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandContext): SimState {
+  if (isSystemsCommand(cmd)) return applySystemsCommand(state, cmd);
   const a = state.aircraft;
   const pos = { lat: a.lat, lon: a.lon };
   const setFms = (next: SimState['fms']) => ({ ...state, fms: next });
@@ -365,6 +392,17 @@ export function applyCommand(state: SimState, cmd: SimCommand, ctx: CommandConte
       return { ...state, env: { ...state.env, windFromTrue: norm360(cmd.fromTrue), windKt: Math.max(cmd.kt, 0) } };
     case 'sim.qnh':
       return { ...state, env: { ...state.env, qnhInHg: cmd.inHg } };
+
+    // Procedure and approach-mode commands: implemented with the procedure-capable FMS.
+    case 'fms.loadApproach':
+    case 'fms.activateApproach':
+    case 'fms.removeApproach':
+    case 'fms.unsuspend':
+    case 'fms.hold':
+    case 'fms.exitHold':
+    case 'ap.armGlidepath':
+    case 'ap.approach':
+      return state;
 
     case 'msg.post':
       return withMessage(state, cmd.text, cmd.level);

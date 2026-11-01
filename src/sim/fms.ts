@@ -1,7 +1,8 @@
 import { alongTrackNm, angleDiff, bearing, crossTrackNm, destination, distanceNm, type LatLon } from '../core/geo';
 import type { MagneticModel } from '../core/magvar';
 import type { Waypoint } from '../core/navdb';
-import type { ActiveLeg, FmsState } from './types';
+import type { AircraftState, ActiveLeg, ApproachDerived, FmsState, FmsSteering, SimState, VerticalDerived } from './types';
+import type { VorSolution } from './radionav';
 
 /*
  * Flight management: the flight plan, the active leg, direct-to, OBS mode and
@@ -11,7 +12,16 @@ import type { ActiveLeg, FmsState } from './types';
  * Every function is pure: state in, state out.
  */
 
-export const EMPTY_FMS: FmsState = { plan: [], activeLeg: null, obsMode: false, obsCourseMag: 0, revision: 0 };
+export const EMPTY_FMS: FmsState = {
+  plan: [],
+  activeLeg: null,
+  obsMode: false,
+  obsCourseMag: 0,
+  revision: 0,
+  approach: null,
+  suspended: false,
+  hold: null,
+};
 
 /** A waypoint for the present position, the origin of a direct-to leg. */
 export function presentPosition(pos: LatLon): Waypoint {
@@ -311,4 +321,27 @@ export function planLegs(s: FmsState, pos: LatLon, mag: MagneticModel): PlanLegI
 export function activeLegIndices(leg: ActiveLeg | null): { from: number | null; to: number } | null {
   if (!leg || leg.planIndex === null) return null;
   return { from: leg.isDirectTo ? null : leg.planIndex - 1, to: leg.planIndex };
+}
+
+// Procedure-capable FMS extension points. The simulator publishes these in
+// `Derived`; they return null until approaches are flown by the FMS.
+
+/** The loaded approach as every device sees it. */
+export function approachDerived(_state: SimState, _aircraft: AircraftState, _mag: MagneticModel): ApproachDerived | null {
+  return null;
+}
+
+/** Vertical deviation from the GPS glidepath or the ILS glideslope. */
+export function verticalDerived(
+  _state: SimState,
+  _aircraft: AircraftState,
+  _mag: MagneticModel,
+  _vor: readonly [VorSolution, VorSolution],
+): VerticalDerived | null {
+  return null;
+}
+
+/** Steering for NAV mode on the active leg (tracks, headings, arcs, holds). */
+export function fmsSteering(_state: SimState, _aircraft: AircraftState, _mag: MagneticModel): FmsSteering | null {
+  return null;
 }

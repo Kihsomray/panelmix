@@ -1,5 +1,5 @@
 import { initialSimState } from './defaults';
-import type { SimState } from './types';
+import { FMS_NULLABLE, SYSTEMS_NULLABLE, type SimState } from './types';
 
 /*
  * Saves the session (radios, flight plan, position) so a reload picks up
@@ -14,7 +14,7 @@ type Plain = Record<string, unknown>;
 const isPlain = (v: unknown): v is Plain => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** State fields that may legitimately be null. */
-const NULLABLE = new Set(['activeLeg', 'minimumsFt', 'identUntil', 'lateralArmed']);
+const NULLABLE = new Set<string>(['minimumsFt', 'identUntil', 'lateralArmed', 'verticalArmed', ...FMS_NULLABLE, ...SYSTEMS_NULLABLE]);
 /** Arrays whose length varies; every other array is a fixed tuple (two radios, two tanks). */
 const OPEN_LISTS = new Set(['plan', 'messages']);
 

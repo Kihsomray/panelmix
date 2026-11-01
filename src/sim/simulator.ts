@@ -1,12 +1,18 @@
+import { NO_AIRSPACE, type AirspaceSource } from '../core/airspace';
 import { distanceNm, norm360 } from '../core/geo';
 import type { MagneticModel } from '../core/magvar';
 import type { NavDatabase } from '../core/navdb';
+import type { ProcedureSource } from '../core/procedures';
+import { NO_TERRAIN, type TerrainProvider } from '../core/terrain';
 import { densityAltitude, densityRatio, indicatedAltitude, outsideAirTempC, pressureAltitude, STD_INHG } from './atmosphere';
 import { guidance } from './autopilot';
 import { applyCommand, type SimCommand } from './commands';
 import { stepFlight } from './flight';
-import { gpsSolution, sequence, type GpsSolution } from './fms';
+import { approachDerived, fmsSteering, gpsSolution, sequence, verticalDerived, type GpsSolution } from './fms';
+import type { ApproachDerived, FmsSteering, VerticalDerived } from './fms/types';
 import { bearingSolution, cdiSolution, vorSolution, type BearingSolution, type CdiSolution, type VorSolution } from './radionav';
+import { computeSystems, stepSystems, type SystemsContext } from './systems';
+import type { SystemsDerived } from './systems/types';
 import type { SimState } from './types';
 
 /*
@@ -38,6 +44,21 @@ export interface Derived {
   readonly windComponents: { readonly headwindKt: number; readonly crosswindKt: number };
   /** Wind direction relative to the airplane's heading, for PFD wind vectors. */
   readonly windRelativeDeg: number;
+  /** Indicated values (with failures), electrical, terrain and airspace awareness. */
+  readonly systems: SystemsDerived;
+  /** The loaded instrument approach, or null. */
+  readonly approach: ApproachDerived | null;
+  /** Vertical deviation (GPS glidepath or ILS glideslope), or null when there is no vertical path. */
+  readonly vertical: VerticalDerived | null;
+  /** What the FMS asks an autopilot in NAV to fly on the active leg. */
+  readonly steering: FmsSteering | null;
+}
+
+/** Optional data sources beyond the navigation database. */
+export interface SimProviders {
+  readonly terrain?: TerrainProvider;
+  readonly airspace?: AirspaceSource;
+  readonly procedures?: ProcedureSource;
 }
 
 export type Listener = () => void;
@@ -58,12 +79,20 @@ export class Simulator {
   private floorCheckedAt = -Infinity;
   private stalled = false;
 
+  readonly terrain: TerrainProvider;
+  readonly airspace: AirspaceSource;
+  readonly procedures: ProcedureSource | null;
+
   constructor(
     readonly db: NavDatabase,
     readonly mag: MagneticModel,
     initial: SimState,
+    providers: SimProviders = {},
   ) {
     this.state = initial;
+    this.terrain = providers.terrain ?? NO_TERRAIN;
+    this.airspace = providers.airspace ?? NO_AIRSPACE;
+    this.procedures = providers.procedures ?? null;
   }
 
   getState = (): SimState => this.state;
@@ -158,8 +187,10 @@ export class Simulator {
       this.floorCheckedAt = time;
     }
 
-    const { aircraft, stalled } = stepFlight(s.aircraft, g.targets, s.env, dt, this.floorFt);
-    let next: SimState = { ...s, time, aircraft, attitudeHold, ap: g.ap };
+    const sys = stepSystems(s, dt, this.systemsContext(s, d));
+    const { aircraft, stalled } = stepFlight(s.aircraft, g.targets, s.env, sys.effects, dt);
+    let next: SimState = { ...s, time, aircraft, attitudeHold, ap: g.ap, systems: sys.systems };
+    for (const m of sys.messages) next = applyCommand(next, { type: 'msg.post', text: m.text, level: m.level }, { mag: this.mag });
 
     if (stalled && !this.stalled) next = applyCommand(next, { type: 'msg.post', text: 'STALL', level: 'caution' }, { mag: this.mag });
     this.stalled = stalled;
@@ -193,16 +224,24 @@ export class Simulator {
       gps,
       vorDistanceNm: null,
     });
-    const windRelativeDeg = norm360(s.env.windFromTrue - a.headingTrue);
+    const indicatedAltitudeFt = indicatedAltitude(a.altitudeFt, s.env.qnhInHg, s.bugs.baroStd ? STD_INHG : s.bugs.baroInHg);
+    const oatC = outsideAirTempC(pAlt, s.env.isaDeviationC);
+    const systems = computeSystems(s, {
+      ...this.systemsContextBase(),
+      indicatedAltitudeFt,
+      headingMag: norm360(a.headingTrue - magVar),
+      oatC,
+    });
+    const windRelativeDeg = norm360(systems.windFromTrue - a.headingTrue);
     const rel = (windRelativeDeg * Math.PI) / 180;
     return {
       magVar,
       headingMag: norm360(a.headingTrue - magVar),
       trackMag: norm360(a.trackTrue - magVar),
       pressureAltitudeFt: pAlt,
-      indicatedAltitudeFt: indicatedAltitude(a.altitudeFt, s.env.qnhInHg, s.bugs.baroStd ? STD_INHG : s.bugs.baroInHg),
+      indicatedAltitudeFt,
       densityAltitudeFt: densityAltitude(pAlt, s.env.isaDeviationC),
-      oatC: outsideAirTempC(pAlt, s.env.isaDeviationC),
+      oatC,
       sigma,
       gps,
       vor,
@@ -212,8 +251,25 @@ export class Simulator {
       flightDirector: g.flightDirector,
       stalled: a.iasKt < 48,
       unreadMessages: s.messages.filter((m) => !m.read).length,
-      windComponents: { headwindKt: s.env.windKt * Math.cos(rel), crosswindKt: s.env.windKt * Math.sin(rel) },
+      windComponents: { headwindKt: systems.windKt * Math.cos(rel), crosswindKt: systems.windKt * Math.sin(rel) },
       windRelativeDeg,
+      systems,
+      approach: approachDerived(s, a, this.mag),
+      vertical: verticalDerived(s, a, this.mag, vor),
+      steering: fmsSteering(s, a, this.mag),
+    };
+  }
+
+  private systemsContextBase() {
+    return { mag: this.mag, terrain: this.terrain, airspace: this.airspace, fieldElevationFt: this.floorFt };
+  }
+
+  private systemsContext(_s: SimState, d: Derived): SystemsContext {
+    return {
+      ...this.systemsContextBase(),
+      indicatedAltitudeFt: d.indicatedAltitudeFt,
+      headingMag: d.headingMag,
+      oatC: d.oatC,
     };
   }
 }

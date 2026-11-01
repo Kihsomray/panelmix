@@ -1,6 +1,6 @@
 import { destination, norm360, windTriangle } from '../core/geo';
 import { densityRatio, pressureAltitude, trueAirspeed } from './atmosphere';
-import type { AircraftState, EngineState, EnvironmentState } from './types';
+import type { AircraftState, EngineState, EnvironmentState, FlightEffects } from './types';
 
 /*
  * A small energy-based flight model tuned to feel like a Cessna 172S.
@@ -108,30 +108,45 @@ export interface FlightStepResult {
   readonly stalled: boolean;
 }
 
+/** No failures, no turbulence, the surface wind, sea-level ground. */
+export function neutralEffects(env: EnvironmentState): FlightEffects {
+  return {
+    powerFactor: 1,
+    windFromTrue: env.windFromTrue,
+    windKt: env.windKt,
+    gustBankDeg: 0,
+    gustVerticalFpm: 0,
+    gustAirspeedKt: 0,
+    groundElevationFt: 0,
+  };
+}
+
 /**
  * Advances the airplane by `dt` seconds toward the commanded bank and vertical
- * speed. `floorFt` is the ground (field elevation) the airplane cannot sink below.
+ * speed. `effects` carries the engine's health, the wind at altitude,
+ * turbulence and the ground elevation the airplane cannot sink below.
  */
 export function stepFlight(
   a: AircraftState,
   targets: FlightTargets,
   env: EnvironmentState,
+  effects: FlightEffects,
   dt: number,
-  floorFt = 0,
 ): FlightStepResult {
   const P = PERFORMANCE;
   const pAlt = pressureAltitude(a.altitudeFt, env.qnhInHg);
   const sigma = densityRatio(pAlt, env.isaDeviationC);
-  const throttle = a.engine.throttle;
+  const throttle = a.engine.throttle * effects.powerFactor;
+  const floorFt = effects.groundElevationFt;
 
   // Roll toward the commanded bank at a limited rate.
-  const bankCmd = Math.min(Math.max(targets.bankDeg, -P.maxBankDeg), P.maxBankDeg);
+  const bankCmd = Math.min(Math.max(targets.bankDeg + effects.gustBankDeg, -P.maxBankDeg), P.maxBankDeg);
   const bankDeg = approach(a.bankDeg, bankCmd, P.rollRateDps * dt);
   const rollRate = (bankDeg - a.bankDeg) / Math.max(dt, 1e-6);
 
   // Below stall speed the nose drops whatever is commanded.
   const stalled = a.iasKt < P.vs;
-  let vsCmd = targets.verticalSpeedFpm;
+  let vsCmd = targets.verticalSpeedFpm + effects.gustVerticalFpm;
   if (stalled) vsCmd = Math.min(vsCmd, -900 - (P.vs - a.iasKt) * 120);
   const vs = a.verticalSpeedFpm + (vsCmd - a.verticalSpeedFpm) * Math.min(dt / P.vsLag, 1);
 
@@ -139,13 +154,13 @@ export function stepFlight(
   const ps = excessPowerFpm(a.iasKt, throttle, sigma);
   const tasFts = Math.max(a.tasKt, 25) * KT_TO_FTS;
   const dTasKt = ((((ps - vs) / 60) * G_FTS2) / tasFts / KT_TO_FTS) * dt;
-  const tasKt = Math.min(Math.max(a.tasKt + dTasKt, 30), 200);
+  const tasKt = Math.min(Math.max(a.tasKt + dTasKt + effects.gustAirspeedKt * Math.min(dt, 1), 30), 200);
   const iasKt = tasKt * Math.sqrt(sigma);
 
   // Turn and wind.
   const turnRateDps = (1091 * Math.tan((bankDeg * Math.PI) / 180)) / Math.max(tasKt, 30);
   const headingTrue = norm360(a.headingTrue + turnRateDps * dt);
-  const { trackTrue, groundSpeedKt } = windTriangle(headingTrue, tasKt, env.windFromTrue, env.windKt);
+  const { trackTrue, groundSpeedKt } = windTriangle(headingTrue, tasKt, effects.windFromTrue, effects.windKt);
   const pos = destination(a, trackTrue, (groundSpeedKt * dt) / 3600);
 
   let altitudeFt = a.altitudeFt + (vs * dt) / 60;

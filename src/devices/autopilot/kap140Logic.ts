@@ -257,7 +257,7 @@ export interface KapDisplay {
 }
 
 const LATERAL_TEXT: Record<LateralMode, string> = { ROL: 'ROL', HDG: 'HDG', NAV: 'NAV' };
-const VERTICAL_TEXT: Record<VerticalMode, string> = { PIT: 'PIT', ALT: 'ALT', VS: 'VS', IAS: 'IAS' };
+const VERTICAL_TEXT: Record<VerticalMode, string> = { PIT: 'PIT', ALT: 'ALT', VS: 'VS', IAS: 'IAS', GS: 'GS' };
 
 export function kapDisplay(s: KapState, v: KapView): KapDisplay {
   const now = v.now;

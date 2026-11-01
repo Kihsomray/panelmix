@@ -3,6 +3,9 @@ import { readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 
+const RUNTIME_PREFIXES = ['data/proc/', 'terrain/'];
+const isRuntimeCached = (f: string) => RUNTIME_PREFIXES.some((p) => f.startsWith(p)) && !f.endsWith('index.json');
+
 /** Every file under `dir`, as paths relative to it with forward slashes. */
 function listFiles(dir: string, prefix = ''): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -34,7 +37,8 @@ function serviceWorker(): Plugin {
       const files = [
         './',
         ...listFiles(outDir)
-          .filter((f) => !f.endsWith('.map') && f !== 'sw.js' && !f.startsWith('.'))
+          // Per-airport procedures and terrain tiles are thousands of files: cached as used, not up front.
+          .filter((f) => !f.endsWith('.map') && f !== 'sw.js' && !f.startsWith('.') && !isRuntimeCached(f))
           .sort()
           .map((f) => `./${f}`),
       ];
@@ -49,17 +53,39 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('panelmix-') && k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('panelmix-') && k !== CACHE && !k.startsWith('panelmix-runtime')).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
 
+const RUNTIME = 'panelmix-runtime-v1';
+const RUNTIME_PATHS = ${JSON.stringify(RUNTIME_PREFIXES)};
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (request.mode === 'navigate') {
     // Network first for the page so updates arrive promptly; the cache when offline.
     event.respondWith(fetch(request).catch(() => caches.match('./')));
+    return;
+  }
+  const scope = new URL(self.registration.scope).pathname;
+  const path = url.pathname.startsWith(scope) ? url.pathname.slice(scope.length) : url.pathname;
+  if (RUNTIME_PATHS.some((p) => path.startsWith(p))) {
+    // Procedures and terrain: keep what has been used, for offline flying in the same area.
+    event.respondWith(
+      caches.open(RUNTIME).then((cache) =>
+        cache.match(request).then(
+          (hit) =>
+            hit ||
+            fetch(request).then((res) => {
+              if (res.ok) cache.put(request, res.clone());
+              return res;
+            }),
+        ),
+      ),
+    );
     return;
   }
   event.respondWith(caches.match(request).then((hit) => hit || fetch(request)));
