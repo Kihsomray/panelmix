@@ -6,6 +6,18 @@ practise every key and knob. The units share one simulator, so they talk to each
 real ones: a flight plan built on the navigator drives the PFD's course needle, the CDI key picks
 GPS or VOR, an autopilot flies the heading bug you set on the HSI.
 
+Try it: https://kihsomray.github.io/panelmix/
+
+![Cessna 172S G1000: PFD and MFD](docs/img/g1000.jpg)
+
+| Steam gauges + GNS 430W + KT 76A + KAP 140 | Aspen E1000 + GTN 750Xi + KAP 140 |
+|---|---|
+| ![Steam gauges with a GNS 430W](docs/img/steam-gns430w.jpg) | ![Aspen with a GTN 750Xi](docs/img/aspen-gtn750.jpg) |
+
+| G5 + GNS 430W + GTX 345 + GFC 500 | On a phone |
+|---|---|
+| ![G5 with a GNS 430W](docs/img/g5-gns430w.jpg) | <img src="docs/img/phone.jpg" alt="G5 on a phone" width="260"> |
+
 ## Units
 
 | Slot | Units |
@@ -25,8 +37,8 @@ pointers, transponder codes, modes and ident, and autopilot modes (heading, NAV 
 altitude preselect and capture, VS, FLC, level, GPS steering) flown by a small energy-based flight model.
 
 The database has about 5,000 US public-use airports with runways and frequencies and 2,700 VORs and
-NDBs. It has no intersections, procedures, localizers or airspace: pages that need those keep their
-real layout and say so.
+NDBs, plus fixes, airways, localizers and instrument procedures from the FAA CIFP, Class B/C/D
+airspace and terrain.
 
 ## Running it
 
